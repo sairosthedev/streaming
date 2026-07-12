@@ -1,0 +1,9 @@
+# Vercel only needs web/. Everything else is the PC-side agent and local server,
+# which cannot run on serverless anyway — and shipping node_modules made the
+# upload ~300 MB.
+node_modules
+web/node_modules
+web/.next
+.agent-hls
+hls
+*.pdf
