@@ -3,50 +3,52 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
 <title>Live Camera</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171b;
+    --line: #23272d;
+    --text: #e6e8eb;
+    --muted: #9aa2ab;
+    --dim: #5c646d;
+    --live: #22c55e;
+    --warn: #eab308;
+    --error: #ef4444;
+  }
 
   body {
     min-height: 100dvh;
     display: grid;
     place-items: center;
-    background: #0b0d10;
-    color: #e6e8eb;
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
     padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
 
   .shell { width: 100%; max-width: 1100px; }
 
-  header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
-  }
+  .bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .bar h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .bar .status { margin-left: auto; font-size: 13px; color: var(--muted); }
 
-  h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
-
-  .dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #4b5259;
-    flex: none;
-  }
-  .dot.live   { background: #22c55e; box-shadow: 0 0 0 4px rgb(34 197 94 / 0.15); }
-  .dot.error  { background: #ef4444; box-shadow: 0 0 0 4px rgb(239 68 68 / 0.15); }
-  .dot.wait   { background: #eab308; animation: pulse 1.4s ease-in-out infinite; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--dim); }
+  .dot.live  { background: var(--live);  box-shadow: 0 0 0 4px rgb(34 197 94 / 0.15); }
+  .dot.wait  { background: var(--warn);  animation: pulse 1.4s ease-in-out infinite; }
+  .dot.error { background: var(--error); box-shadow: 0 0 0 4px rgb(239 68 68 / 0.15); }
 
   @keyframes pulse { 50% { opacity: 0.35; } }
-
-  .status { font-size: 13px; color: #9aa2ab; margin-left: auto; }
 
   .stage {
     position: relative;
     aspect-ratio: 16 / 9;
     background: #000;
-    border: 1px solid #23272d;
+    border: 1px solid var(--line);
     border-radius: 12px;
     overflow: hidden;
   }
@@ -60,7 +62,7 @@
     place-items: center;
     padding: 24px;
     text-align: center;
-    background: #0b0d10;
+    background: var(--bg);
   }
   .overlay[hidden] { display: none; }
 
@@ -74,68 +76,54 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .overlay p { color: #9aa2ab; font-size: 14px; }
-  .overlay .detail {
-    margin-top: 10px;
+  .overlay p { color: var(--muted); font-size: 14px; }
+  .overlay .hint {
+    margin-top: 12px;
     font-size: 12px;
-    color: #6b7480;
-    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-    max-width: 60ch;
+    color: var(--dim);
+    max-width: 52ch;
+    line-height: 1.6;
+    font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
     word-break: break-word;
   }
 
   form { display: flex; gap: 8px; justify-content: center; }
 
-  input, button {
-    font: inherit;
-    border-radius: 8px;
-    border: 1px solid #2a2f36;
-    padding: 9px 14px;
-  }
-  input {
-    background: #14171b;
-    color: #e6e8eb;
-    width: 220px;
-  }
+  input, button { font: inherit; border-radius: 8px; border: 1px solid var(--line); padding: 9px 14px; }
+  input { width: 220px; background: var(--panel); color: var(--text); }
   input:focus { outline: none; border-color: #4b5259; }
-  button {
-    background: #e6e8eb;
-    color: #0b0d10;
-    border-color: #e6e8eb;
-    font-weight: 500;
-    cursor: pointer;
-  }
+  button { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 500; cursor: pointer; }
   button:hover { background: #fff; }
+  button:disabled { opacity: 0.5; cursor: default; }
 
-  .err { color: #f87171; font-size: 13px; margin-top: 10px; min-height: 1.4em; }
+  .err { min-height: 1.4em; margin-top: 10px; font-size: 13px; color: #f87171; }
 
-  footer {
-    margin-top: 10px;
-    font-size: 12px;
-    color: #5c646d;
+  .foot {
     display: flex;
     justify-content: space-between;
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--dim);
   }
-  a { color: #9aa2ab; }
 </style>
 </head>
 <body>
 <div class="shell">
-  <header>
+  <div class="bar">
     <span class="dot wait" id="dot"></span>
     <h1>Live Camera</h1>
-    <span class="status" id="status">Starting…</span>
-  </header>
+    <span class="status" id="status">Starting...</span>
+  </div>
 
   <div class="stage">
     <video id="video" playsinline muted autoplay controls></video>
 
     <div class="overlay" id="gate" hidden>
       <div>
-        <p style="margin-bottom:14px">This feed is password protected.</p>
+        <p style="margin-bottom:16px">This feed is password protected.</p>
         <form id="loginForm">
           <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
-          <button type="submit">Watch</button>
+          <button type="submit" id="loginBtn">Watch</button>
         </form>
         <div class="err" id="loginError"></div>
       </div>
@@ -144,31 +132,34 @@
     <div class="overlay" id="loader">
       <div>
         <div class="spinner"></div>
-        <p id="loaderText">Connecting to camera…</p>
-        <div class="detail" id="loaderDetail"></div>
+        <p id="loaderText">Connecting to camera...</p>
+        <div class="hint" id="loaderHint"></div>
       </div>
     </div>
   </div>
 
-  <footer>
-    <span>HLS · ~6&ndash;10s behind live</span>
-    <a href="/hls/stream.m3u8" id="rawLink">stream.m3u8</a>
-  </footer>
+  <div class="foot">
+    <span>HLS &middot; ~6-10s behind live</span>
+    <span>Unlimited &middot; served from this PC</span>
+  </div>
 </div>
 
 <script src="/vendor/hls.min.js"></script>
 <script>
-const video       = document.getElementById('video');
-const dot         = document.getElementById('dot');
-const statusEl    = document.getElementById('status');
-const gate        = document.getElementById('gate');
-const loader      = document.getElementById('loader');
-const loaderText  = document.getElementById('loaderText');
-const loaderDetail= document.getElementById('loaderDetail');
-const loginForm   = document.getElementById('loginForm');
-const loginError  = document.getElementById('loginError');
+const video      = document.getElementById('video');
+const dot        = document.getElementById('dot');
+const statusEl   = document.getElementById('status');
+const gate       = document.getElementById('gate');
+const loader     = document.getElementById('loader');
+const loaderText = document.getElementById('loaderText');
+const loaderHint = document.getElementById('loaderHint');
+const loginForm  = document.getElementById('loginForm');
+const loginError = document.getElementById('loginError');
+const loginBtn   = document.getElementById('loginBtn');
+const passwordEl = document.getElementById('password');
 
 const PLAYLIST = '/hls/stream.m3u8';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function setStatus(state, text) {
   dot.className = 'dot ' + state;
@@ -177,12 +168,15 @@ function setStatus(state, text) {
 
 async function boot() {
   const cfg = await (await fetch('/api/config')).json();
+
   if (cfg.requiresPassword && !cfg.authenticated) {
     loader.hidden = true;
     gate.hidden = false;
     setStatus('wait', 'Locked');
+    passwordEl.focus();
     return;
   }
+
   gate.hidden = true;
   loader.hidden = false;
   waitForStream();
@@ -191,30 +185,37 @@ async function boot() {
 loginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   loginError.textContent = '';
+  loginBtn.disabled = true;
+
   const res = await fetch('/api/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: document.getElementById('password').value }),
+    body: JSON.stringify({ password: passwordEl.value }),
   });
+
+  loginBtn.disabled = false;
+
   if (!res.ok) {
     loginError.textContent = 'Wrong password.';
+    passwordEl.value = '';
     return;
   }
+
   gate.hidden = true;
   loader.hidden = false;
   waitForStream();
 });
 
-// FFmpeg needs a few seconds to connect to the camera and write the first
-// segments. Poll until they exist, then hand off to hls.js — attaching the
-// player to a playlist that isn't there yet just produces a spurious error.
+// ffmpeg needs a few seconds to reach the camera and write the first segments.
+// Attaching hls.js to a playlist that doesn't exist yet just produces a
+// spurious fatal error, so poll until the server says it is ready.
 async function waitForStream() {
-  setStatus('wait', 'Connecting…');
+  setStatus('wait', 'Connecting...');
 
-  for (let attempt = 0; attempt < 40; attempt++) {
+  for (let attempt = 0; attempt < 60; attempt++) {
     let s;
     try {
-      s = await (await fetch('/api/stream/status')).json();
+      s = await (await fetch('/api/stream/status', { cache: 'no-store' })).json();
     } catch {
       await sleep(1000);
       continue;
@@ -227,36 +228,36 @@ async function waitForStream() {
     }
 
     if (attempt > 6 && s.error) {
-      loaderText.textContent = 'Still trying to reach the camera…';
-      loaderDetail.textContent = s.error;
+      loaderText.textContent = 'Still trying to reach the camera...';
+      loaderHint.textContent = s.error;
     }
     await sleep(1000);
   }
 
   setStatus('error', 'No signal');
   loaderText.textContent = 'Could not reach the camera.';
-  loaderDetail.textContent =
-    'Check RTSP_URL in .env, and that this machine can see the camera on the network.';
+  loaderHint.textContent =
+    'Check RTSP_URL in .env and that this machine can still see the camera. Run: npm run probe';
 }
 
 function play() {
-  // Safari (and iOS in particular) plays HLS natively; everywhere else needs hls.js.
-  if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = PLAYLIST;
-    video.addEventListener('loadedmetadata', () => video.play().catch(() => {}));
-    setStatus('live', 'Live');
-    return;
-  }
-
+  // hls.js where supported; native HLS is the fallback for Safari/iOS, which
+  // play .m3u8 directly but where hls.js is not supported.
   if (!window.Hls || !Hls.isSupported()) {
-    setStatus('error', 'Unsupported browser');
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = PLAYLIST;
+      video.addEventListener('loadedmetadata', () => video.play().catch(() => {}));
+      setStatus('live', 'Live');
+    } else {
+      setStatus('error', 'Unsupported browser');
+    }
     return;
   }
 
   const hls = new Hls({
-    lowLatencyMode: true,
     liveSyncDurationCount: 3,
-    // A camera stream never ends; keep retrying rather than giving up.
+    // A camera feed never ends. Keep retrying rather than giving up: the server
+    // reconnects to the camera on its own, and the player should wait for it.
     manifestLoadingMaxRetry: Infinity,
     levelLoadingMaxRetry: Infinity,
     fragLoadingMaxRetry: Infinity,
@@ -274,10 +275,10 @@ function play() {
     if (!data.fatal) return;
 
     if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-      setStatus('wait', 'Reconnecting…');
+      setStatus('wait', 'Reconnecting...');
       hls.startLoad();
     } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-      setStatus('wait', 'Recovering…');
+      setStatus('wait', 'Recovering...');
       hls.recoverMediaError();
     } else {
       setStatus('error', 'Stream failed');
@@ -285,16 +286,15 @@ function play() {
     }
   });
 
-  // A live feed that drifts behind is worse than one that skips: snap back to
-  // the live edge whenever we fall more than ~10s behind.
+  // Drifting behind is worse than skipping on a live feed: snap back to the
+  // live edge whenever we fall more than ~12s behind.
   setInterval(() => {
     if (!video.duration || video.paused) return;
-    const behind = video.duration - video.currentTime;
-    if (behind > 10) video.currentTime = video.duration - 1;
+    if (video.duration - video.currentTime > 12) {
+      video.currentTime = video.duration - 1;
+    }
   }, 5000);
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 boot();
 </script>

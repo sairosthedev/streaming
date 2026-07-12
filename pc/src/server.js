@@ -41,12 +41,24 @@ let ffmpeg = null;
 let restartTimer = null;
 let shuttingDown = false;
 let lastFfmpegError = '';
+/** For reconnect backoff: how long the last ffmpeg run survived. */
+let ffmpegStartedAt = 0;
+let restarts = 0;
 /** Set when ffmpeg isn't installed — retrying the spawn would just fail forever. */
 let ffmpegMissing = false;
 
-/** Watchers keep FFmpeg alive; with none, it stops after IDLE_TIMEOUT_MS. */
+/**
+ * Watchers keep ffmpeg alive; with none, it stops after IDLE_TIMEOUT_MS. This
+ * spares the camera and the CPU when nobody is looking -- bandwidth is free
+ * here, but a 24/7 pull from the camera is not free for the camera.
+ *
+ * Set IDLE_TIMEOUT=0 in .env to stream continuously regardless of viewers.
+ */
 let lastViewerAt = Date.now();
-const IDLE_TIMEOUT_MS = 60_000;
+const IDLE_TIMEOUT_MS =
+  process.env.IDLE_TIMEOUT !== undefined
+    ? Number(process.env.IDLE_TIMEOUT) * 1000
+    : 300_000;
 
 function ffmpegArgs() {
   const args = ['-hide_banner', '-loglevel', 'error'];
@@ -107,6 +119,7 @@ function startFfmpeg() {
   }
 
   console.log(`[ffmpeg] connecting to ${safeUrl} (${RTSP_TRANSPORT}, ${VIDEO_MODE})`);
+  ffmpegStartedAt = Date.now();
   ffmpeg = spawn(bin, ffmpegArgs(), { windowsHide: true });
 
   ffmpeg.stderr.on('data', (chunk) => {
@@ -136,8 +149,19 @@ function startFfmpeg() {
   ffmpeg.on('close', (code) => {
     ffmpeg = null;
     if (shuttingDown || ffmpegMissing) return;
-    console.warn(`[ffmpeg] exited (code ${code}) — retrying in 3s`);
-    restartTimer = setTimeout(startFfmpeg, 3000);
+
+    // A run that produced video was a genuine camera drop (WiFi blip, "bad
+    // cseq") -- reconnect promptly. A run that died on startup is a real fault
+    // (bad URL, camera off) and retrying it every 3s just spins the CPU, so
+    // back off up to 30s.
+    const lived = Date.now() - ffmpegStartedAt;
+    if (lived > 15_000) restarts = 0;
+    else restarts++;
+
+    const delay = Math.min(3000 * 2 ** Math.max(0, restarts - 1), 30_000);
+
+    console.warn(`[ffmpeg] exited (code ${code}) - reconnecting in ${delay / 1000}s`);
+    restartTimer = setTimeout(startFfmpeg, delay);
   });
 }
 
@@ -145,15 +169,18 @@ function stopFfmpeg() {
   clearTimeout(restartTimer);
   restartTimer = null;
   if (!ffmpeg) return;
-  console.log('[ffmpeg] no viewers — stopping to save bandwidth');
+  console.log('[ffmpeg] no viewers - stopping (set IDLE_TIMEOUT=0 to stay on)');
   ffmpeg.kill('SIGKILL'); // SIGTERM is a no-op for ffmpeg on Windows
   ffmpeg = null;
 }
 
 // Stop pulling from the camera once everyone has closed the page.
-setInterval(() => {
-  if (ffmpeg && Date.now() - lastViewerAt > IDLE_TIMEOUT_MS) stopFfmpeg();
-}, 10_000).unref();
+// IDLE_TIMEOUT=0 disables this entirely and keeps the stream always-on.
+if (IDLE_TIMEOUT_MS > 0) {
+  setInterval(() => {
+    if (ffmpeg && Date.now() - lastViewerAt > IDLE_TIMEOUT_MS) stopFfmpeg();
+  }, 10_000).unref();
+}
 
 // ---------------------------------------------------------------------------
 // Auth: one shared password, exchanged for a signed cookie.
