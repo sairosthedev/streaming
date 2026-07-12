@@ -269,11 +269,18 @@ function play() {
     // Keep enough buffered that a late segment doesn't empty the pipe.
     maxBufferLength: 20,
 
-    // A camera feed never ends. Keep retrying rather than giving up: the server
-    // reconnects to the camera on its own, and the player should wait for it.
+    // The playlist is worth retrying forever: a camera feed never ends, and the
+    // server reconnects on its own, so the player should wait it out.
     manifestLoadingMaxRetry: Infinity,
     levelLoadingMaxRetry: Infinity,
-    fragLoadingMaxRetry: Infinity,
+
+    // A fragment is NOT. This was Infinity, which meant a segment that had
+    // already rolled off the server got retried forever -- the request 404s,
+    // hls.js immediately re-requests it, playback never advances, and the
+    // console fills with the same GET. A missing segment is gone; give up on it
+    // quickly so the gap handler below can skip past it.
+    fragLoadingMaxRetry: 2,
+    fragLoadingRetryDelay: 500,
   });
 
   hls.loadSource(PLAYLIST);
@@ -285,6 +292,25 @@ function play() {
   });
 
   hls.on(Hls.Events.ERROR, (_evt, data) => {
+    // A segment that 404s has rolled off the server's window and is never coming
+    // back. Retrying it forever is what stalled playback and filled the console
+    // with the same GET; once the retries above are exhausted, skip the gap and
+    // resume at the live edge instead.
+    //
+    // Only on 404/410. A 5xx or a timeout may well succeed on retry, and hls.js
+    // has already done that by the time this is fatal.
+    const status = data.response?.code;
+    const isFragLoad =
+      data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR ||
+      data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT;
+
+    if (data.fatal && isFragLoad && (status === 404 || status === 410)) {
+      setStatus('wait', 'Skipping gap...');
+      hls.stopLoad();
+      hls.startLoad(-1); // -1 = resume from the live edge, past the missing segment
+      return;
+    }
+
     if (!data.fatal) return;
 
     if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
