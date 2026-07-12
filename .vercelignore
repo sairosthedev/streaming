@@ -1,9 +1,6 @@
-# Vercel only needs web/. Everything else is the PC-side agent and local server,
-# which cannot run on serverless anyway — and shipping node_modules made the
-# upload ~300 MB.
-node_modules
-web/node_modules
-web/.next
-.agent-hls
-hls
+# pc/ is the camera agent and the local server. They run on the PC that can see
+# the camera; nothing in there can run on serverless. Keeping them out of the
+# deployment also stops Vercel autodetecting the wrong framework from their
+# package.json.
+pc/
 *.pdf

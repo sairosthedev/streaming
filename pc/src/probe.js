@@ -6,7 +6,7 @@
  * Run this first whenever the player shows "No signal". It tells you whether
  * the problem is the camera/network or the browser/player.
  */
-import 'dotenv/config';
+import './env.js';
 import { spawn } from 'node:child_process';
 import { which, installHint } from './which.js';
 

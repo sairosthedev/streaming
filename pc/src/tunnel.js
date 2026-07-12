@@ -6,7 +6,7 @@
  * Run this alongside `npm start`. cloudflared buries the URL in its log output,
  * so we pull it out and print it on its own.
  */
-import 'dotenv/config';
+import './env.js';
 import { spawn } from 'node:child_process';
 import { which, installHint } from './which.js';
 

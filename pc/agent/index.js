@@ -12,7 +12,7 @@
  * gives the player a 404. So segments upload first, and the playlist we publish
  * only ever lists segments already confirmed up.
  */
-import 'dotenv/config';
+import '../src/env.js';
 import { put, del, list } from '@vercel/blob';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -20,6 +20,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { which, installHint } from '../src/which.js';
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORK_DIR = path.join(__dirname, '..', '.agent-hls');

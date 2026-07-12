@@ -1,23 +1,22 @@
 {
-  "name": "streaming",
+  "name": "streaming-web",
   "version": "1.0.0",
   "private": true,
-  "description": "Stream an RTSP IP camera to any browser, anywhere, over a public HTTPS URL.",
-  "type": "module",
-  "main": "src/server.js",
   "scripts": {
-    "agent": "node agent/index.js",
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
-    "tunnel": "node src/tunnel.js",
-    "probe": "node src/probe.js"
-  },
-  "engines": {
-    "node": ">=18"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
   },
   "dependencies": {
     "@vercel/blob": "^2.6.1",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.2"
+    "hls.js": "^1.5.17",
+    "next": "^15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.7",
+    "typescript": "^5.7.3"
   }
 }
