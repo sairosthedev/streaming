@@ -5,7 +5,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+
+    "camera": "npm --prefix pc start",
+    "tunnel": "npm --prefix pc run tunnel",
+    "probe": "npm --prefix pc run probe",
+    "agent": "npm --prefix pc run agent"
   },
   "dependencies": {
     "@vercel/blob": "^2.6.1",
