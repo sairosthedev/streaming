@@ -94,8 +94,17 @@ function ffmpegArgs() {
 
   args.push(
     '-f', 'hls',
+    // ffmpeg can only cut a segment on a keyframe, and this camera emits one
+    // every 2.0s, so 2s is the floor -- asking for less silently yields the
+    // same segments.
     '-hls_time', '2',
-    '-hls_list_size', '6',
+
+    // A 12s window (6 x 2s) is too tight: one slow segment and the player falls
+    // off the back of the playlist, which is an instant unrecoverable skip.
+    // Segments live on local disk here, not in metered object storage, so a
+    // wider window is free. 10 x 2s = 20s of slack.
+    '-hls_list_size', '10',
+
     // delete_segments keeps the folder from growing without bound;
     // append_list + omit_endlist keep the playlist looking live to the player.
     '-hls_flags', 'delete_segments+append_list+omit_endlist',

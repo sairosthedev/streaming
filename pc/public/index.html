@@ -255,7 +255,20 @@ function play() {
   }
 
   const hls = new Hls({
+    // Sit ~3 segments (6s) behind the live edge. Chasing the edge harder than
+    // this means playing fragments the instant they appear, with no buffer to
+    // absorb a slow segment -- which stalls, rebuffers, and stutters.
     liveSyncDurationCount: 3,
+
+    // Let hls.js correct drift by nudging playback rate instead of seeking.
+    // Seeking is audible and visible as a skip; a 5% rate change is not.
+    // Without these it only ever hard-seeks, which is what made the feed jump.
+    maxLiveSyncPlaybackRate: 1.05,
+    liveMaxLatencyDurationCount: 10,
+
+    // Keep enough buffered that a late segment doesn't empty the pipe.
+    maxBufferLength: 20,
+
     // A camera feed never ends. Keep retrying rather than giving up: the server
     // reconnects to the camera on its own, and the player should wait for it.
     manifestLoadingMaxRetry: Infinity,
@@ -286,12 +299,28 @@ function play() {
     }
   });
 
-  // Drifting behind is worse than skipping on a live feed: snap back to the
-  // live edge whenever we fall more than ~12s behind.
+  // Only rescue playback that has fallen hopelessly behind -- a laptop that was
+  // asleep, a tab backgrounded for a while.
+  //
+  // The previous version of this seeked whenever playback was >12s behind, and
+  // seeked to `duration - 1`. Both were wrong. The playlist window IS 12s
+  // (6 segments x 2s) and hls.js deliberately sits ~6s back, so normal playback
+  // sat right on the trigger and got yanked every few seconds; and `duration -
+  // 1` is the unbuffered bleeding edge, so each yank landed in an empty buffer
+  // and stalled. That feedback loop was the stutter. hls.js now handles routine
+  // drift by nudging the playback rate (see maxLiveSyncPlaybackRate above).
   setInterval(() => {
-    if (!video.duration || video.paused) return;
-    if (video.duration - video.currentTime > 12) {
-      video.currentTime = video.duration - 1;
+    if (video.paused || video.seeking || !video.buffered.length) return;
+
+    const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+    const behind = bufferedEnd - video.currentTime;
+
+    // 30s is far outside anything hls.js's rate correction would allow, so this
+    // only fires when playback is genuinely stuck, never during normal viewing.
+    if (behind > 30) {
+      // Seek into buffered data, not to the live edge, so playback resumes
+      // immediately instead of stalling while it refills.
+      video.currentTime = bufferedEnd - 4;
     }
   }, 5000);
 }
