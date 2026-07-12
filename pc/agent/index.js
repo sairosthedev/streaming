@@ -55,10 +55,13 @@ fs.mkdirSync(WORK_DIR, { recursive: true });
 // FFmpeg
 // ---------------------------------------------------------------------------
 
-function ffmpegArgs() {
+function ffmpegArgs(startNumber = 0) {
   const args = ['-hide_banner', '-loglevel', 'error'];
 
   if (RTSP_URL.startsWith('rtsp://')) {
+    // -reconnect* are HTTP-demuxer options. ffmpeg rejects them for RTSP with
+    // "Option reconnect not found" and refuses to start, so reconnection is
+    // handled by respawning the process in startFfmpeg(), not by ffmpeg itself.
     args.push('-rtsp_transport', RTSP_TRANSPORT, '-timeout', '10000000');
   }
 
@@ -81,6 +84,10 @@ function ffmpegArgs() {
     '-f', 'hls',
     '-hls_time', '2',
     '-hls_list_size', String(WINDOW),
+    // Continue the segment numbering across reconnects. Without this ffmpeg
+    // restarts at 0 on every respawn, overwriting segments still live in Blob
+    // and rewinding the playlist under the player.
+    '-start_number', String(startNumber),
     // No delete_segments: we delete from Blob ourselves, and we need the local
     // file to still exist when we get around to uploading it.
     '-hls_flags', 'append_list+omit_endlist',
@@ -103,24 +110,71 @@ console.log(`  Mode:    ${VIDEO_MODE} over ${RTSP_TRANSPORT}`);
 console.log(`  Target:  Vercel Blob\n`);
 console.log(`  Connecting...\n`);
 
-const ffmpeg = spawn(bin, ffmpegArgs(), { windowsHide: true });
-ffmpeg.stderr.on('data', (d) => {
-  const m = d.toString().trim();
-  if (m) console.error('[ffmpeg]', m);
-});
-ffmpeg.on('close', (code) => {
-  console.error(`\n  ffmpeg exited (code ${code}). Stopping.\n`);
-  process.exit(1);
-});
+let ffmpeg = null;
+let stopping = false;
+let restarts = 0;
+let startedAt = 0;
+
+/**
+ * IP cameras drop their RTSP connection routinely -- a WiFi blip shows up as
+ * "bad cseq" or "Error during demuxing" and ffmpeg exits, sometimes with code
+ * 0. Treat any exit as a reconnect, not as the end of the stream: the whole
+ * point of the agent is to keep the feed up while the PC is on.
+ */
+function startFfmpeg() {
+  if (stopping) return;
+
+  // ffmpeg restarts its segment counter at 0 every run. Reusing numbers already
+  // in Blob would overwrite live segments and rewind the playlist, so carry on
+  // from where the last run left off.
+  const startNumber = nextSegmentNumber;
+  startedAt = Date.now();
+
+  ffmpeg = spawn(bin, ffmpegArgs(startNumber), { windowsHide: true });
+
+  ffmpeg.stderr.on('data', (d) => {
+    const m = d.toString().trim();
+    if (m) console.error('[ffmpeg]', m);
+  });
+
+  ffmpeg.on('error', (err) => {
+    console.error(`  ffmpeg failed to start: ${err.message}`);
+  });
+
+  ffmpeg.on('close', (code) => {
+    ffmpeg = null;
+    if (stopping) return;
+
+    // A run that produced video was a genuine drop; reconnect promptly. A run
+    // that died immediately is a real fault (bad URL, bad flag, camera down) --
+    // retrying that every 3s spins the CPU and hammers Blob, which is how the
+    // store got rate-limited once already. Back off instead, up to 30s.
+    const lived = Date.now() - startedAt;
+    if (lived > 15_000) restarts = 0;
+    else restarts++;
+
+    const delay = Math.min(3000 * 2 ** Math.max(0, restarts - 1), 30_000);
+
+    console.error(`\n  Camera connection dropped (ffmpeg exit ${code}).`);
+    console.error(`  Reconnecting in ${Math.round(delay / 1000)}s...\n`);
+    setTimeout(startFfmpeg, delay);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Upload loop
 // ---------------------------------------------------------------------------
 
-/** Segment filenames confirmed uploaded, oldest first. */
+/** Segment filenames confirmed uploaded to Blob. */
 const uploaded = [];
 const inFlight = new Set();
 let firstPublish = true;
+
+/**
+ * Where a restarted ffmpeg should resume numbering. Declared before
+ * startFfmpeg() runs (hoisting only covers the function, not this binding).
+ */
+let nextSegmentNumber = 0;
 
 async function uploadSegment(name) {
   const file = path.join(WORK_DIR, name);
@@ -228,6 +282,11 @@ async function tick() {
   }
 
   for (const name of names) {
+    // A reconnected ffmpeg resumes from nextSegmentNumber, so track the high
+    // water mark as soon as a segment appears on disk -- not once it uploads.
+    // If the camera drops mid-upload we still need to know where to resume.
+    nextSegmentNumber = Math.max(nextSegmentNumber, segNumber(name) + 1);
+
     if (uploaded.includes(name) || inFlight.has(name)) continue;
 
     inFlight.add(name);
@@ -245,6 +304,8 @@ async function tick() {
   }
 }
 
+startFfmpeg();
+
 const timer = setInterval(() => {
   tick().catch((e) => console.error('  ' + e.message));
 }, 500);
@@ -252,9 +313,10 @@ const timer = setInterval(() => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function shutdown() {
+  stopping = true; // otherwise the close handler treats this as a drop and respawns
   clearInterval(timer);
-  ffmpeg.kill('SIGKILL');
-  console.log('\n  Stopping — clearing Blob...');
+  ffmpeg?.kill('SIGKILL'); // may already be dead, mid-reconnect
+  console.log('\n  Stopping - clearing Blob...');
   try {
     const { blobs } = await list({ prefix: 'live/', token: TOKEN });
     await Promise.all(blobs.map((b) => del(b.url, { token: TOKEN }).catch(() => {})));
