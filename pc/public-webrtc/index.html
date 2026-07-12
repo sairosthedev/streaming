@@ -240,22 +240,58 @@ async function connect() {
   });
 
   // Receive-only: we never send media to the camera.
+  //
+  // Video only. Most IP cameras send no audio track at all -- this one sends a
+  // single H264 track -- and negotiating an audio transceiver against a source
+  // that has none leaves an empty audio stream in play, which is what e.streams[0]
+  // can resolve to. The element then holds a stream with no video track and
+  // renders grey while the peer connection cheerfully reports "connected".
   pc.addTransceiver('video', { direction: 'recvonly' });
-  pc.addTransceiver('audio', { direction: 'recvonly' });
+
+  // Build the stream from the tracks we actually receive rather than trusting
+  // e.streams[0] to be the one carrying video.
+  const stream = new MediaStream();
 
   pc.ontrack = (e) => {
-    if (video.srcObject !== e.streams[0]) {
-      video.srcObject = e.streams[0];
-      video.play().catch(() => {});
+    stream.addTrack(e.track);
+
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
     }
+
+    // Autoplay can still be refused; the element is muted, which browsers allow,
+    // but a user-gesture policy can bite. Surface it rather than showing grey.
+    video.play().catch((err) => {
+      setStatus('wait', 'Click to play');
+      loader.hidden = false;
+      loaderText.textContent = 'Click anywhere to start the video.';
+      loaderHint.textContent = err.message;
+      document.body.addEventListener(
+        'click',
+        () => {
+          video.play().catch(() => {});
+          loader.hidden = true;
+        },
+        { once: true },
+      );
+    });
   };
+
+  // "Live" must mean frames are on screen, not merely that the peer connection
+  // opened. Reporting Live on connectionState alone is what made a grey screen
+  // look like a working stream.
+  video.addEventListener('playing', () => {
+    loader.hidden = true;
+    setStatus('live', 'Live');
+    retryDelay = 1000;
+  });
 
   pc.onconnectionstatechange = () => {
     if (!pc) return;
 
     if (pc.connectionState === 'connected') {
-      loader.hidden = true;
-      setStatus('live', 'Live');
+      // Connected, but not necessarily decoding yet -- wait for 'playing'.
+      setStatus('wait', 'Receiving...');
       retryDelay = 1000;
     } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
       // A camera feed should survive a network blip. Back off so a hard failure
@@ -295,6 +331,10 @@ async function connect() {
 
     const answer = await res.text();
     await pc.setRemoteDescription({ type: 'answer', sdp: answer });
+
+    // Connected but never decoding is the grey-screen failure. Detect it via
+    // framesDecoded rather than leaving the viewer staring at a blank rectangle.
+    watchForFrames();
   } catch (err) {
     setStatus('error', 'Connection failed');
     loader.hidden = false;
@@ -303,6 +343,53 @@ async function connect() {
     setTimeout(connect, retryDelay);
     retryDelay = Math.min(retryDelay * 2, 15000);
   }
+}
+
+/**
+ * A peer connection can be "connected" while zero frames ever decode -- a codec
+ * mismatch, a track that never arrives. The symptom is a grey rectangle and a
+ * green "Live" dot, which tells the viewer nothing. Read framesDecoded from the
+ * stats and say what is actually happening.
+ */
+function watchForFrames() {
+  const peer = pc;
+  let elapsed = 0;
+
+  const timer = setInterval(async () => {
+    if (!pc || pc !== peer) {
+      clearInterval(timer);
+      return;
+    }
+
+    elapsed += 2;
+
+    let decoded = 0;
+    let received = 0;
+
+    const stats = await pc.getStats();
+    stats.forEach((r) => {
+      if (r.type === 'inbound-rtp' && r.kind === 'video') {
+        decoded = r.framesDecoded ?? 0;
+        received = r.bytesReceived ?? 0;
+      }
+    });
+
+    if (decoded > 0) {
+      clearInterval(timer); // frames are flowing; nothing to report
+      return;
+    }
+
+    if (elapsed >= 8) {
+      clearInterval(timer);
+      setStatus('error', 'No video');
+      loader.hidden = false;
+      loaderText.textContent = 'Connected, but no video is decoding.';
+      loaderHint.textContent =
+        received > 0
+          ? `Receiving data (${Math.round(received / 1024)} KB) but decoding no frames - the camera may be sending a codec this browser cannot play (e.g. H.265).`
+          : 'No video data is arriving. The connection is open but the camera track never started.';
+    }
+  }, 2000);
 }
 
 function iceGatheringComplete(peer) {

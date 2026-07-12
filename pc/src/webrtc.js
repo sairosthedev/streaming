@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { which } from './which.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -20,6 +21,9 @@ const VIEW_PASSWORD = process.env.VIEW_PASSWORD || '';
 // this server, so the password gate cannot be bypassed by hitting them directly.
 const MTX_WEBRTC_PORT = 8889;
 const MTX_API_PORT = 9997;
+const MTX_RTSP_PORT = 8554;
+
+const TRANSCODE_BITRATE = process.env.TRANSCODE_BITRATE || '3000k';
 
 if (!RTSP_URL || RTSP_URL.includes('username:password')) {
   console.error('\n  RTSP_URL is not set. Put your camera URL in .env\n');
@@ -58,7 +62,13 @@ logDestinations: [stdout]
 api: yes
 apiAddress: 127.0.0.1:${MTX_API_PORT}
 
-rtsp: no
+# RTSP on localhost only. Not for viewers -- it is the loopback the transcode
+# step below reads from and writes back into. Bound to 127.0.0.1 so it is not
+# reachable from the network.
+rtsp: yes
+rtspAddress: 127.0.0.1:${MTX_RTSP_PORT}
+protocols: [tcp]
+
 rtmp: no
 hls: no
 srt: no
@@ -73,7 +83,9 @@ webrtcICEServers2:
   - url: stun:stun.l.google.com:19302
 
 paths:
-  cam:
+  # The camera, pulled straight from RTSP. Not served to browsers directly --
+  # see the 'cam' path below for why.
+  camraw:
     source: ${quoted}
     sourceProtocol: ${RTSP_TRANSPORT}
 
@@ -81,11 +93,20 @@ paths:
     # already connecting, so /api/stream/status could never report ready before
     # someone watched -- and the page waits for ready before it connects. That
     # deadlocks: the page waits for the camera, the camera waits for the page.
-    #
-    # Always-on also means the stream is live the instant a viewer arrives
-    # rather than after a 2-3s dial. Bandwidth is free here (nothing is metered),
-    # so the only cost is a continuous pull from the camera.
     sourceOnDemand: no
+
+  # What browsers actually read. Published into by the transcode ffmpeg that this
+  # server spawns (see startTranscode) -- an empty path here just accepts it.
+  #
+  # The camera encodes H264 with pix_fmt yuvj420p -- the full-range JPEG variant
+  # of YUV420. Browser H264 decoders expect limited-range yuv420p. Handed
+  # yuvj420p they accept the RTP, report no error, and decode nothing: the peer
+  # connection reads "connected", megabytes arrive, and the screen stays grey.
+  # ffprobe decodes it fine, which is what makes this so easy to misdiagnose.
+  #
+  # MediaMTX forwards the stream untouched, so the only fix is to re-encode into
+  # a pixel format browsers will decode.
+  cam:
 `;
 
   fs.writeFileSync(MTX_CONF, yaml);
@@ -94,6 +115,7 @@ paths:
 let mtx = null;
 let mtxReady = false;
 let lastError = '';
+let shuttingDown = false;
 
 function startMediaMtx() {
   writeConfig();
@@ -121,6 +143,87 @@ function startMediaMtx() {
     if (shuttingDown) return;
     console.error(`\n  mediamtx exited (${code}) - restarting in 3s\n`);
     setTimeout(startMediaMtx, 3000);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Transcode: camraw (yuvj420p, unplayable) -> cam (yuv420p, what browsers want)
+//
+// Run from here rather than MediaMTX's runOnInit: runOnInit fires when a path is
+// created, and a path with no source never initializes, so the transcode simply
+// never started. Spawning it ourselves also means its errors are visible instead
+// of swallowed -- which is how the level-3.1 mistake below stayed hidden.
+// ---------------------------------------------------------------------------
+
+let transcode = null;
+let transcodeStartedAt = 0;
+let transcodeRestarts = 0;
+
+function transcodeArgs() {
+  return [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-rtsp_transport', 'tcp',
+    '-i', `rtsp://127.0.0.1:${MTX_RTSP_PORT}/camraw`,
+
+    // The scale filter is what actually converts the range. `-pix_fmt yuv420p`
+    // ALONE IS NOT ENOUGH: x264 carries the source's full-range flag through and
+    // the output comes back out as yuvj420p / color_range=pc, unchanged. Only
+    // scale=out_range=tv converts it. Verified with ffprobe; don't drop this.
+    '-vf', 'scale=out_range=tv:out_color_matrix=bt709',
+    '-pix_fmt', 'yuv420p',
+    '-color_range', 'tv',
+
+    // Level 4.0, not 3.1: 3.1 caps out around 720p, and x264 refuses 1080p25
+    // outright ("MB rate > level limit") and encodes nothing.
+    '-c:v', 'libx264',
+    '-profile:v', 'baseline',
+    '-level', '4.0',
+    '-preset', 'ultrafast',
+    '-tune', 'zerolatency',
+    '-b:v', TRANSCODE_BITRATE,
+    '-g', '50',
+    '-bf', '0',
+    '-an',
+
+    '-f', 'rtsp',
+    '-rtsp_transport', 'tcp',
+    `rtsp://127.0.0.1:${MTX_RTSP_PORT}/cam`,
+  ];
+}
+
+function startTranscode() {
+  if (transcode || shuttingDown) return;
+
+  const bin = which('ffmpeg');
+  if (!bin) {
+    lastError = 'ffmpeg not found. Install it: winget install Gyan.FFmpeg';
+    console.error(`\n  ${lastError}\n`);
+    return;
+  }
+
+  transcodeStartedAt = Date.now();
+  transcode = spawn(bin, transcodeArgs(), { windowsHide: true });
+
+  transcode.stderr.on('data', (d) => {
+    const line = d.toString().trim();
+    if (!line) return;
+    lastError = line.split('\n').pop().slice(0, 300);
+    console.error('[transcode]', line);
+  });
+
+  transcode.on('close', (code) => {
+    transcode = null;
+    if (shuttingDown) return;
+
+    // Back off if it dies immediately (a real fault); reconnect fast if it ran.
+    const lived = Date.now() - transcodeStartedAt;
+    if (lived > 15_000) transcodeRestarts = 0;
+    else transcodeRestarts++;
+
+    const delay = Math.min(2000 * 2 ** Math.max(0, transcodeRestarts - 1), 30_000);
+    console.error(`[transcode] exited (${code}) - restarting in ${delay / 1000}s`);
+    setTimeout(startTranscode, delay);
   });
 }
 
@@ -305,11 +408,28 @@ server.on('error', (err) => {
 
 startMediaMtx();
 
-let shuttingDown = false;
+// The transcode reads camraw from MediaMTX, so it has to wait for MediaMTX's
+// RTSP listener to be up. Poll rather than guess at a fixed delay.
+(async function waitThenTranscode() {
+  for (let i = 0; i < 30; i++) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${MTX_API_PORT}/v3/paths/get/camraw`);
+      if (r.ok && (await r.json()).ready) {
+        startTranscode();
+        return;
+      }
+    } catch {
+      // MediaMTX still coming up.
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  console.error('\n  Camera never became ready. Check RTSP_URL, or run: npm run probe\n');
+})();
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     shuttingDown = true;
+    transcode?.kill('SIGKILL');
     mtx?.kill();
     process.exit(0);
   });
