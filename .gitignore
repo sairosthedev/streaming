@@ -5,6 +5,11 @@ node_modules/
 .vercel/
 pc/hls/
 pc/.agent-hls/
+
+# MediaMTX: a 30 MB binary, fetched by `npm run setup`, plus the config we
+# generate from .env on every start (it contains the camera password).
+pc/bin/
+
 *.log
 .DS_Store
 Thumbs.db

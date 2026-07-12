@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
 
+    "setup": "npm --prefix pc install && npm --prefix pc run setup",
     "camera": "npm --prefix pc start",
+    "hls": "npm --prefix pc run hls",
     "tunnel": "npm --prefix pc run tunnel",
     "probe": "npm --prefix pc run probe",
     "agent": "npm --prefix pc run agent"

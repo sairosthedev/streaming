@@ -6,9 +6,10 @@
   "type": "module",
   "main": "src/server.js",
   "scripts": {
+    "setup": "node src/setup.js",
+    "start": "node src/webrtc.js",
+    "hls": "node src/server.js",
     "agent": "node agent/index.js",
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
     "tunnel": "node src/tunnel.js",
     "probe": "node src/probe.js"
   },
