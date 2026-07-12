@@ -8,6 +8,7 @@
  */
 import 'dotenv/config';
 import { spawn } from 'node:child_process';
+import { which, installHint } from './which.js';
 
 const RTSP_URL = process.env.RTSP_URL;
 const RTSP_TRANSPORT = process.env.RTSP_TRANSPORT || 'tcp';
@@ -17,9 +18,15 @@ if (!RTSP_URL || RTSP_URL.includes('username:password')) {
   process.exit(1);
 }
 
+const bin = which('ffprobe');
+if (!bin) {
+  console.error(`\n  ${installHint('ffprobe')}\n`);
+  process.exit(1);
+}
+
 console.log(`Probing ${RTSP_URL.replace(/\/\/[^@/]*@/, '//***:***@')} over ${RTSP_TRANSPORT}…\n`);
 
-const ffprobe = spawn('ffprobe', [
+const ffprobe = spawn(bin, [
   '-v', 'error',
   '-rtsp_transport', RTSP_TRANSPORT,
   '-timeout', '10000000',

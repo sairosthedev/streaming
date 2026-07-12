@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { which, installHint } from './which.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -97,8 +98,16 @@ function ffmpegArgs() {
 function startFfmpeg() {
   if (ffmpeg || shuttingDown || ffmpegMissing) return;
 
+  const bin = which('ffmpeg');
+  if (!bin) {
+    ffmpegMissing = true;
+    lastFfmpegError = installHint('ffmpeg').replace(/\n\s*/g, ' ');
+    console.error(`\n  ${installHint('ffmpeg')}\n`);
+    return;
+  }
+
   console.log(`[ffmpeg] connecting to ${safeUrl} (${RTSP_TRANSPORT}, ${VIDEO_MODE})`);
-  ffmpeg = spawn('ffmpeg', ffmpegArgs(), { windowsHide: true });
+  ffmpeg = spawn(bin, ffmpegArgs(), { windowsHide: true });
 
   ffmpeg.stderr.on('data', (chunk) => {
     const msg = chunk.toString().trim();
@@ -273,12 +282,23 @@ app.use(
 
 app.use(express.static(path.join(ROOT, 'public')));
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  Camera:  ${safeUrl}`);
   console.log(`  Local:   http://localhost:${PORT}`);
-  console.log(`  Password: ${VIEW_PASSWORD ? 'on' : 'OFF — anyone with the URL can watch'}`);
+  console.log(`  Password: ${VIEW_PASSWORD ? 'on' : 'OFF - anyone with the URL can watch'}`);
   console.log(`\n  For a public URL, run this in a second terminal:`);
   console.log(`    npm run tunnel\n`);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n  Port ${PORT} is already in use.\n`);
+    console.error('  The server is probably already running in another terminal —');
+    console.error(`  try opening http://localhost:${PORT} first.`);
+    console.error(`\n  If not, close the other process or set a different PORT in .env.\n`);
+    process.exit(1);
+  }
+  throw err;
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
