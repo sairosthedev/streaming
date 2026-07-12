@@ -3,8 +3,15 @@
  *
  *   npm run tunnel
  *
- * Run this alongside `npm start`. cloudflared buries the URL in its log output,
- * so we pull it out and print it on its own.
+ * Two modes, chosen by .env:
+ *
+ * - TUNNEL_NAME + TUNNEL_HOSTNAME set: run that named tunnel. The URL is
+ *   permanent (e.g. https://camera.titancctv.xyz) and never changes across
+ *   restarts. Requires the one-time setup: `cloudflared tunnel login`,
+ *   `cloudflared tunnel create <name>`, `cloudflared tunnel route dns <name> <hostname>`.
+ *
+ * - Otherwise: a quick tunnel with a random trycloudflare.com URL that changes
+ *   on every restart. Zero setup, good for trying things out.
  */
 import './env.js';
 import { spawn } from 'node:child_process';
@@ -12,6 +19,10 @@ import { which, installHint } from './which.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const HAS_PASSWORD = Boolean(process.env.VIEW_PASSWORD);
+const TUNNEL_NAME = process.env.TUNNEL_NAME || '';
+const TUNNEL_HOSTNAME = process.env.TUNNEL_HOSTNAME || '';
+
+const named = Boolean(TUNNEL_NAME && TUNNEL_HOSTNAME);
 
 const bin = which('cloudflared');
 if (!bin) {
@@ -19,35 +30,59 @@ if (!bin) {
   process.exit(1);
 }
 
-console.log(`\n  Opening a public tunnel to http://localhost:${PORT} ...\n`);
+const args = named
+  ? ['tunnel', 'run', '--url', `http://localhost:${PORT}`, TUNNEL_NAME]
+  : ['tunnel', '--url', `http://localhost:${PORT}`];
 
-const proc = spawn(bin, ['tunnel', '--url', `http://localhost:${PORT}`], {
-  windowsHide: true,
-});
+console.log(
+  named
+    ? `\n  Starting tunnel "${TUNNEL_NAME}" -> http://localhost:${PORT} ...\n`
+    : `\n  Opening a quick tunnel to http://localhost:${PORT} ...\n`,
+);
+
+const proc = spawn(bin, args, { windowsHide: true });
 
 let announced = false;
+
+function announce(url) {
+  announced = true;
+  // ASCII only: the default Windows console code page renders box-drawing
+  // characters as mojibake, which makes the URL harder to read, not easier.
+  const rule = '='.repeat(url.length + 4);
+  console.log(`  ${rule}`);
+  console.log(`    ${url}`);
+  console.log(`  ${rule}\n`);
+  if (named) {
+    console.log('  This URL is PERMANENT - it is the same on every restart.');
+  } else {
+    console.log('  Open that from anywhere - phone, another network, a friend.');
+  }
+  console.log(
+    HAS_PASSWORD
+      ? `  Viewers need the password: ${process.env.VIEW_PASSWORD}\n`
+      : '  NO PASSWORD SET - anyone with this link can watch your camera.\n',
+  );
+  console.log('  Keep this window open. Closing it takes the feed offline.\n');
+}
 
 function scan(chunk) {
   const text = chunk.toString();
 
-  // cloudflared logs to stderr; the URL shows up once the tunnel is registered.
-  const url = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/.exec(text)?.[0];
-  if (url && !announced) {
-    announced = true;
-    // ASCII only: the default Windows console code page renders box-drawing
-    // characters as mojibake, which makes the URL harder to read, not easier.
-    const rule = '='.repeat(url.length + 4);
-    console.log(`  ${rule}`);
-    console.log(`    ${url}`);
-    console.log(`  ${rule}\n`);
-    console.log('  Open that from anywhere - phone, another network, a friend.');
-    console.log(
-      HAS_PASSWORD
-        ? `  Viewers need the password: ${process.env.VIEW_PASSWORD}\n`
-        : '  NO PASSWORD SET - anyone with this link can watch your camera.\n',
-    );
-    console.log('  Keep this window open. Closing it takes the URL down.\n');
-    return;
+  if (!announced) {
+    if (named) {
+      // A named tunnel never prints its hostname; it logs connection
+      // registrations instead. First registered connection = live.
+      if (/Registered tunnel connection/i.test(text)) {
+        announce(`https://${TUNNEL_HOSTNAME}`);
+        return;
+      }
+    } else {
+      const url = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/.exec(text)?.[0];
+      if (url) {
+        announce(url);
+        return;
+      }
+    }
   }
 
   // Surface real errors; drop cloudflared's routine chatter.
