@@ -154,17 +154,26 @@ async function uploadSegment(name) {
   return true;
 }
 
+/** seg00042.ts -> 42 */
+function segNumber(name) {
+  return Number(name.match(/(\d+)/)[1]);
+}
+
 /**
  * Publish a playlist listing only segments we've confirmed are in Blob.
  * The player polls this; it must never name a segment that 404s.
  */
 async function publishPlaylist() {
-  const live = uploaded.slice(-WINDOW);
+  // Segments upload concurrently and finish out of order, so `uploaded` is in
+  // completion order, not stream order. HLS requires strictly ascending
+  // segments -- publishing them shuffled makes the player jump around in time.
+  // Sort by segment number and take the newest WINDOW.
+  const live = [...uploaded].sort((a, b) => segNumber(a) - segNumber(b)).slice(-WINDOW);
   if (!live.length) return;
 
-  // MEDIA-SEQUENCE must equal the index of the first listed segment, or the
+  // MEDIA-SEQUENCE must equal the number of the first listed segment, or the
   // player will re-download old segments and stall.
-  const mediaSequence = Number(live[0].match(/(\d+)/)[1]);
+  const mediaSequence = segNumber(live[0]);
 
   const lines = [
     '#EXTM3U',
@@ -195,13 +204,18 @@ async function publishPlaylist() {
 /** Drop segments that have rolled out of the window, so Blob doesn't grow forever. */
 async function prune() {
   while (uploaded.length > WINDOW + 2) {
-    const old = uploaded.shift();
+    // Evict the oldest by segment number, not by upload-completion order --
+    // uploads finish out of order, so shifting the array could delete a newer
+    // segment and leave an older one live.
+    const oldest = uploaded.reduce((a, b) => (segNumber(a) <= segNumber(b) ? a : b));
+    uploaded.splice(uploaded.indexOf(oldest), 1);
+
     try {
-      await del(`live/${old}`, { token: TOKEN });
+      await del(`live/${oldest}`, { token: TOKEN });
     } catch {
       // A failed delete costs a little storage; it must not break the stream.
     }
-    await fsp.rm(path.join(WORK_DIR, old), { force: true }).catch(() => {});
+    await fsp.rm(path.join(WORK_DIR, oldest), { force: true }).catch(() => {});
   }
 }
 

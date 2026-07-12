@@ -44,8 +44,13 @@ export async function GET(
   return new NextResponse(upstream.body, {
     headers: {
       'Content-Type': 'video/mp2t',
-      // A segment's bytes never change once written, so let the browser keep it.
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      // MUST be private. This response is gated on a session cookie, and a
+      // `public` Cache-Control let Vercel's CDN cache one viewer's segment and
+      // then serve it to unauthenticated requests -- the edge answers before
+      // the auth check ever runs, so the password gated the page but not the
+      // video. `private` keeps it in the viewer's own browser cache only,
+      // which is where the immutability is actually worth having.
+      'Cache-Control': 'private, max-age=31536000, immutable',
     },
   });
 }
