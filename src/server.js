@@ -40,21 +40,30 @@ let ffmpeg = null;
 let restartTimer = null;
 let shuttingDown = false;
 let lastFfmpegError = '';
+/** Set when ffmpeg isn't installed — retrying the spawn would just fail forever. */
+let ffmpegMissing = false;
 
 /** Watchers keep FFmpeg alive; with none, it stops after IDLE_TIMEOUT_MS. */
 let lastViewerAt = Date.now();
 const IDLE_TIMEOUT_MS = 60_000;
 
 function ffmpegArgs() {
-  const args = [
-    '-hide_banner',
-    '-loglevel', 'error',
-    '-rtsp_transport', RTSP_TRANSPORT,
-    // Give a slow camera time to answer before we call it dead.
-    '-stimeout', '10000000',
+  const args = ['-hide_banner', '-loglevel', 'error'];
+
+  // These are RTSP-demuxer options; ffmpeg rejects them outright for other inputs.
+  if (RTSP_URL.startsWith('rtsp://')) {
+    args.push(
+      '-rtsp_transport', RTSP_TRANSPORT,
+      // Socket I/O timeout in microseconds — 10s for a slow camera to answer.
+      // FFmpeg 7 renamed this from -stimeout; -timeout is the current spelling.
+      '-timeout', '10000000',
+    );
+  }
+
+  args.push(
     '-i', RTSP_URL,
     '-an', // no audio: most cameras send none, and a missing track breaks HLS
-  ];
+  );
 
   if (VIDEO_MODE === 'transcode') {
     args.push(
@@ -86,7 +95,7 @@ function ffmpegArgs() {
 }
 
 function startFfmpeg() {
-  if (ffmpeg || shuttingDown) return;
+  if (ffmpeg || shuttingDown || ffmpegMissing) return;
 
   console.log(`[ffmpeg] connecting to ${safeUrl} (${RTSP_TRANSPORT}, ${VIDEO_MODE})`);
   ffmpeg = spawn('ffmpeg', ffmpegArgs(), { windowsHide: true });
@@ -99,17 +108,25 @@ function startFfmpeg() {
   });
 
   ffmpeg.on('error', (err) => {
+    ffmpeg = null;
+
+    // Surface this to the viewer rather than killing the server: the page and
+    // its assets are already being served, and a hard exit mid-request drops them.
     if (err.code === 'ENOENT') {
-      console.error('\n  ffmpeg not found on PATH. Install it, then open a NEW terminal:');
-      console.error('    winget install Gyan.FFmpeg\n');
-      process.exit(1);
+      ffmpegMissing = true;
+      lastFfmpegError =
+        'ffmpeg is not on PATH. Install it (winget install Gyan.FFmpeg), then open a NEW terminal and restart.';
+      console.error(`\n  ${lastFfmpegError}\n`);
+      return;
     }
+
+    lastFfmpegError = err.message;
     console.error('[ffmpeg] spawn failed:', err.message);
   });
 
   ffmpeg.on('close', (code) => {
     ffmpeg = null;
-    if (shuttingDown) return;
+    if (shuttingDown || ffmpegMissing) return;
     console.warn(`[ffmpeg] exited (code ${code}) — retrying in 3s`);
     restartTimer = setTimeout(startFfmpeg, 3000);
   });
@@ -176,6 +193,9 @@ function requireAuth(req, res, next) {
 const app = express();
 app.use(express.json());
 app.disable('x-powered-by');
+// Cloudflare Tunnel fronts us and terminates TLS; without this, req.secure is
+// always false and we'd never mark the session cookie Secure in production.
+app.set('trust proxy', true);
 
 app.get('/api/config', (req, res) => {
   const { session } = parseCookies(req.headers.cookie);
@@ -195,10 +215,25 @@ app.post('/api/login', (req, res) => {
 
   if (!ok) return res.status(401).json({ error: 'Wrong password' });
 
-  res.setHeader(
-    'Set-Cookie',
-    `session=${issueToken()}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax; Secure`,
-  );
+  // Only mark the cookie Secure when the request actually came over HTTPS —
+  // Cloudflare terminates TLS and tells us via x-forwarded-proto. Setting it
+  // unconditionally would stop the cookie from ever coming back over plain
+  // HTTP on localhost or the LAN, locking the viewer out of their own feed.
+  const isHttps =
+    req.secure || req.headers['x-forwarded-proto'] === 'https';
+
+  const cookie = [
+    `session=${issueToken()}`,
+    'HttpOnly',
+    'Path=/',
+    'Max-Age=604800',
+    'SameSite=Lax',
+    isHttps ? 'Secure' : null,
+  ]
+    .filter(Boolean)
+    .join('; ');
+
+  res.setHeader('Set-Cookie', cookie);
   res.json({ ok: true });
 });
 

@@ -22,7 +22,7 @@ console.log(`Probing ${RTSP_URL.replace(/\/\/[^@/]*@/, '//***:***@')} over ${RTS
 const ffprobe = spawn('ffprobe', [
   '-v', 'error',
   '-rtsp_transport', RTSP_TRANSPORT,
-  '-stimeout', '10000000',
+  '-timeout', '10000000',
   '-show_entries', 'stream=codec_name,codec_type,width,height,avg_frame_rate',
   '-of', 'default=noprint_wrappers=1',
   '-i', RTSP_URL,
