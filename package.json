@@ -1,0 +1,21 @@
+{
+  "name": "streaming",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stream an RTSP IP camera to any browser, anywhere, over a public HTTPS URL.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "tunnel": "cloudflared tunnel --url http://localhost:8080",
+    "probe": "node src/probe.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
+  }
+}

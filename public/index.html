@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Live Camera</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    background: #0b0d10;
+    color: #e6e8eb;
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 16px;
+  }
+
+  .shell { width: 100%; max-width: 1100px; }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #4b5259;
+    flex: none;
+  }
+  .dot.live   { background: #22c55e; box-shadow: 0 0 0 4px rgb(34 197 94 / 0.15); }
+  .dot.error  { background: #ef4444; box-shadow: 0 0 0 4px rgb(239 68 68 / 0.15); }
+  .dot.wait   { background: #eab308; animation: pulse 1.4s ease-in-out infinite; }
+
+  @keyframes pulse { 50% { opacity: 0.35; } }
+
+  .status { font-size: 13px; color: #9aa2ab; margin-left: auto; }
+
+  .stage {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border: 1px solid #23272d;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  video { width: 100%; height: 100%; display: block; object-fit: contain; }
+
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    text-align: center;
+    background: #0b0d10;
+  }
+  .overlay[hidden] { display: none; }
+
+  .spinner {
+    width: 26px; height: 26px;
+    margin: 0 auto 14px;
+    border: 2px solid #2a2f36;
+    border-top-color: #6b7480;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .overlay p { color: #9aa2ab; font-size: 14px; }
+  .overlay .detail {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #6b7480;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    max-width: 60ch;
+    word-break: break-word;
+  }
+
+  form { display: flex; gap: 8px; justify-content: center; }
+
+  input, button {
+    font: inherit;
+    border-radius: 8px;
+    border: 1px solid #2a2f36;
+    padding: 9px 14px;
+  }
+  input {
+    background: #14171b;
+    color: #e6e8eb;
+    width: 220px;
+  }
+  input:focus { outline: none; border-color: #4b5259; }
+  button {
+    background: #e6e8eb;
+    color: #0b0d10;
+    border-color: #e6e8eb;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  button:hover { background: #fff; }
+
+  .err { color: #f87171; font-size: 13px; margin-top: 10px; min-height: 1.4em; }
+
+  footer {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #5c646d;
+    display: flex;
+    justify-content: space-between;
+  }
+  a { color: #9aa2ab; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <span class="dot wait" id="dot"></span>
+    <h1>Live Camera</h1>
+    <span class="status" id="status">Starting…</span>
+  </header>
+
+  <div class="stage">
+    <video id="video" playsinline muted autoplay controls></video>
+
+    <div class="overlay" id="gate" hidden>
+      <div>
+        <p style="margin-bottom:14px">This feed is password protected.</p>
+        <form id="loginForm">
+          <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
+          <button type="submit">Watch</button>
+        </form>
+        <div class="err" id="loginError"></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="loader">
+      <div>
+        <div class="spinner"></div>
+        <p id="loaderText">Connecting to camera…</p>
+        <div class="detail" id="loaderDetail"></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span>HLS · ~6&ndash;10s behind live</span>
+    <a href="/hls/stream.m3u8" id="rawLink">stream.m3u8</a>
+  </footer>
+</div>
+
+<script src="/vendor/hls.min.js"></script>
+<script>
+const video       = document.getElementById('video');
+const dot         = document.getElementById('dot');
+const statusEl    = document.getElementById('status');
+const gate        = document.getElementById('gate');
+const loader      = document.getElementById('loader');
+const loaderText  = document.getElementById('loaderText');
+const loaderDetail= document.getElementById('loaderDetail');
+const loginForm   = document.getElementById('loginForm');
+const loginError  = document.getElementById('loginError');
+
+const PLAYLIST = '/hls/stream.m3u8';
+
+function setStatus(state, text) {
+  dot.className = 'dot ' + state;
+  statusEl.textContent = text;
+}
+
+async function boot() {
+  const cfg = await (await fetch('/api/config')).json();
+  if (cfg.requiresPassword && !cfg.authenticated) {
+    loader.hidden = true;
+    gate.hidden = false;
+    setStatus('wait', 'Locked');
+    return;
+  }
+  gate.hidden = true;
+  loader.hidden = false;
+  waitForStream();
+}
+
+loginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  loginError.textContent = '';
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: document.getElementById('password').value }),
+  });
+  if (!res.ok) {
+    loginError.textContent = 'Wrong password.';
+    return;
+  }
+  gate.hidden = true;
+  loader.hidden = false;
+  waitForStream();
+});
+
+// FFmpeg needs a few seconds to connect to the camera and write the first
+// segments. Poll until they exist, then hand off to hls.js — attaching the
+// player to a playlist that isn't there yet just produces a spurious error.
+async function waitForStream() {
+  setStatus('wait', 'Connecting…');
+
+  for (let attempt = 0; attempt < 40; attempt++) {
+    let s;
+    try {
+      s = await (await fetch('/api/stream/status')).json();
+    } catch {
+      await sleep(1000);
+      continue;
+    }
+
+    if (s.ready) {
+      loader.hidden = true;
+      play();
+      return;
+    }
+
+    if (attempt > 6 && s.error) {
+      loaderText.textContent = 'Still trying to reach the camera…';
+      loaderDetail.textContent = s.error;
+    }
+    await sleep(1000);
+  }
+
+  setStatus('error', 'No signal');
+  loaderText.textContent = 'Could not reach the camera.';
+  loaderDetail.textContent =
+    'Check RTSP_URL in .env, and that this machine can see the camera on the network.';
+}
+
+function play() {
+  // Safari (and iOS in particular) plays HLS natively; everywhere else needs hls.js.
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = PLAYLIST;
+    video.addEventListener('loadedmetadata', () => video.play().catch(() => {}));
+    setStatus('live', 'Live');
+    return;
+  }
+
+  if (!window.Hls || !Hls.isSupported()) {
+    setStatus('error', 'Unsupported browser');
+    return;
+  }
+
+  const hls = new Hls({
+    lowLatencyMode: true,
+    liveSyncDurationCount: 3,
+    // A camera stream never ends; keep retrying rather than giving up.
+    manifestLoadingMaxRetry: Infinity,
+    levelLoadingMaxRetry: Infinity,
+    fragLoadingMaxRetry: Infinity,
+  });
+
+  hls.loadSource(PLAYLIST);
+  hls.attachMedia(video);
+
+  hls.on(Hls.Events.MANIFEST_PARSED, () => {
+    video.play().catch(() => {});
+    setStatus('live', 'Live');
+  });
+
+  hls.on(Hls.Events.ERROR, (_evt, data) => {
+    if (!data.fatal) return;
+
+    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+      setStatus('wait', 'Reconnecting…');
+      hls.startLoad();
+    } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+      setStatus('wait', 'Recovering…');
+      hls.recoverMediaError();
+    } else {
+      setStatus('error', 'Stream failed');
+      hls.destroy();
+    }
+  });
+
+  // A live feed that drifts behind is worse than one that skips: snap back to
+  // the live edge whenever we fall more than ~10s behind.
+  setInterval(() => {
+    if (!video.duration || video.paused) return;
+    const behind = video.duration - video.currentTime;
+    if (behind > 10) video.currentTime = video.duration - 1;
+  }, 5000);
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+boot();
+</script>
+</body>
+</html>
