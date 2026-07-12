@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="robots" content="noindex, nofollow" />
-<title>Live Camera</title>
+<title>Titan CCTV</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -43,6 +43,36 @@
   .dot.error { background: var(--error); box-shadow: 0 0 0 4px rgb(239 68 68 / 0.15); }
 
   @keyframes pulse { 50% { opacity: 0.35; } }
+
+  .cams {
+    display: none;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .cams.on { display: flex; }
+
+  .cams button {
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cams button:hover { color: var(--text); border-color: #4b5259; }
+  .cams button.active {
+    color: var(--text);
+    border-color: var(--live);
+    background: rgb(34 197 94 / 0.08);
+  }
+  .cams .camdot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+  .cams .camdot.up { background: var(--live); }
 
   .stage {
     position: relative;
@@ -87,12 +117,12 @@
 
   form { display: flex; gap: 8px; justify-content: center; }
 
-  input, button { font: inherit; border-radius: 8px; border: 1px solid var(--line); padding: 9px 14px; }
+  input, .overlay button { font: inherit; border-radius: 8px; border: 1px solid var(--line); padding: 9px 14px; }
   input { width: 220px; background: var(--panel); color: var(--text); }
   input:focus { outline: none; border-color: #4b5259; }
-  button { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 500; cursor: pointer; }
-  button:hover { background: #fff; }
-  button:disabled { opacity: 0.5; cursor: default; }
+  .overlay button { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 500; cursor: pointer; }
+  .overlay button:hover { background: #fff; }
+  .overlay button:disabled { opacity: 0.5; cursor: default; }
 
   .err { min-height: 1.4em; margin-top: 10px; font-size: 13px; color: #f87171; }
 
@@ -104,19 +134,18 @@
     color: var(--dim);
   }
 
-  .tag {
-    font-family: ui-monospace, Consolas, monospace;
-    color: var(--live);
-  }
+  .tag { font-family: ui-monospace, Consolas, monospace; color: var(--live); }
 </style>
 </head>
 <body>
 <div class="shell">
   <div class="bar">
     <span class="dot wait" id="dot"></span>
-    <h1>Live Camera</h1>
+    <h1>Titan CCTV</h1>
     <span class="status" id="status">Starting...</span>
   </div>
+
+  <div class="cams" id="cams"></div>
 
   <div class="stage">
     <video id="video" playsinline muted autoplay controls></video>
@@ -142,7 +171,7 @@
   </div>
 
   <div class="foot">
-    <span class="tag" id="latency">WebRTC &middot; sub-second</span>
+    <span class="tag">WebRTC &middot; sub-second</span>
     <span>Unlimited &middot; served from this PC</span>
   </div>
 </div>
@@ -159,8 +188,14 @@ const loginForm  = document.getElementById('loginForm');
 const loginError = document.getElementById('loginError');
 const loginBtn   = document.getElementById('loginBtn');
 const passwordEl = document.getElementById('password');
+const camsEl     = document.getElementById('cams');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let cameras = [];       // [{name,label,ready}]
+let current = null;     // selected camera name
+let pc = null;
+let retryDelay = 1000;
 
 function setStatus(state, text) {
   dot.className = 'dot ' + state;
@@ -180,7 +215,7 @@ async function boot() {
 
   gate.hidden = true;
   loader.hidden = false;
-  start();
+  enter();
 }
 
 loginForm.addEventListener('submit', async (e) => {
@@ -204,102 +239,147 @@ loginForm.addEventListener('submit', async (e) => {
 
   gate.hidden = true;
   loader.hidden = false;
-  start();
+  enter();
 });
 
-/**
- * WHEP: POST an SDP offer, get an SDP answer, and the media then flows
- * peer-to-peer. There are no segments and no playlist -- this is a continuous
- * stream, which is why it lands under a second instead of 6-10.
- */
-let pc = null;
-let retryDelay = 1000;
+/** After auth: discover cameras, render the picker, pick one, connect. */
+async function enter() {
+  setStatus('wait', 'Loading cameras...');
 
-async function start() {
+  await refreshCameras();
+
+  if (!cameras.length) {
+    setStatus('error', 'No cameras');
+    loaderText.textContent = 'No cameras are configured.';
+    loaderHint.textContent = 'Add one on the server: npm run cameras -- add ...';
+    return;
+  }
+
+  // Deep link: ?cam=<name>. Otherwise first ready camera, otherwise first.
+  const wanted = new URLSearchParams(location.search).get('cam');
+  current =
+    cameras.find((c) => c.name === wanted)?.name ??
+    cameras.find((c) => c.ready)?.name ??
+    cameras[0].name;
+
+  renderPicker();
+  watch(current);
+
+  // Keep readiness dots fresh.
+  setInterval(async () => {
+    await refreshCameras();
+    renderPicker();
+  }, 10_000);
+}
+
+async function refreshCameras() {
+  try {
+    const res = await fetch('/api/cameras', { cache: 'no-store' });
+    if (res.status === 401) { location.reload(); return; }
+    const data = await res.json();
+    cameras = data.cameras ?? [];
+    if (data.error && !cameras.some((c) => c.ready)) loaderHint.textContent = data.error;
+  } catch {
+    // Server unreachable; keep the last list.
+  }
+}
+
+function renderPicker() {
+  // One camera needs no picker.
+  camsEl.className = cameras.length > 1 ? 'cams on' : 'cams';
+  camsEl.innerHTML = '';
+
+  for (const cam of cameras) {
+    const btn = document.createElement('button');
+    btn.className = cam.name === current ? 'active' : '';
+
+    const d = document.createElement('span');
+    d.className = 'camdot' + (cam.ready ? ' up' : '');
+    btn.appendChild(d);
+    btn.appendChild(document.createTextNode(cam.label));
+
+    btn.addEventListener('click', () => {
+      if (cam.name === current) return;
+      current = cam.name;
+      history.replaceState(null, '', '?cam=' + encodeURIComponent(cam.name));
+      renderPicker();
+      watch(cam.name);
+    });
+
+    camsEl.appendChild(btn);
+  }
+}
+
+/** Wait for the chosen camera to have video, then connect to it. */
+async function watch(name) {
+  cleanup();
+  loader.hidden = false;
+  loaderText.textContent = 'Connecting to camera...';
+  loaderHint.textContent = '';
   setStatus('wait', 'Connecting...');
+  retryDelay = 1000;
 
-  // The camera is pulled on demand, so it can take a few seconds to come up on
-  // the first connection. Wait for it rather than failing the handshake.
   for (let i = 0; i < 30; i++) {
-    try {
-      const s = await (await fetch('/api/stream/status', { cache: 'no-store' })).json();
-      if (s.ready) break;
-      if (i > 4 && s.error) loaderHint.textContent = s.error;
-    } catch { /* server still starting */ }
+    if (current !== name) return; // user switched away while we waited
+    const cam = cameras.find((c) => c.name === name);
+    if (cam?.ready) break;
+    await refreshCameras();
     await sleep(1000);
   }
 
-  connect();
+  connect(name);
 }
 
-async function connect() {
+async function connect(name) {
+  if (current !== name) return;
   cleanup();
 
   pc = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
   });
 
-  // Receive-only: we never send media to the camera.
-  //
-  // Video only. Most IP cameras send no audio track at all -- this one sends a
-  // single H264 track -- and negotiating an audio transceiver against a source
-  // that has none leaves an empty audio stream in play, which is what e.streams[0]
-  // can resolve to. The element then holds a stream with no video track and
-  // renders grey while the peer connection cheerfully reports "connected".
+  // Receive-only, video only. Most IP cameras send no audio track, and
+  // negotiating an audio transceiver against a source that has none leaves an
+  // empty audio stream that e.streams[0] can resolve to -- the element then
+  // holds a stream with no video track and renders grey while the connection
+  // reports "connected".
   pc.addTransceiver('video', { direction: 'recvonly' });
 
-  // Build the stream from the tracks we actually receive rather than trusting
-  // e.streams[0] to be the one carrying video.
   const stream = new MediaStream();
 
   pc.ontrack = (e) => {
     stream.addTrack(e.track);
+    if (video.srcObject !== stream) video.srcObject = stream;
 
-    if (video.srcObject !== stream) {
-      video.srcObject = stream;
-    }
-
-    // Autoplay can still be refused; the element is muted, which browsers allow,
-    // but a user-gesture policy can bite. Surface it rather than showing grey.
-    video.play().catch((err) => {
+    video.play().catch(() => {
       setStatus('wait', 'Click to play');
       loader.hidden = false;
       loaderText.textContent = 'Click anywhere to start the video.';
-      loaderHint.textContent = err.message;
       document.body.addEventListener(
         'click',
-        () => {
-          video.play().catch(() => {});
-          loader.hidden = true;
-        },
+        () => { video.play().catch(() => {}); loader.hidden = true; },
         { once: true },
       );
     });
   };
 
-  // "Live" must mean frames are on screen, not merely that the peer connection
-  // opened. Reporting Live on connectionState alone is what made a grey screen
-  // look like a working stream.
-  video.addEventListener('playing', () => {
-    loader.hidden = true;
-    setStatus('live', 'Live');
-    retryDelay = 1000;
-  });
+  // "Live" means frames are on screen, not merely that the peer connection
+  // opened -- reporting live on connectionState is how a grey screen once
+  // looked like a working stream.
+  video.addEventListener('playing', onPlaying);
 
   pc.onconnectionstatechange = () => {
     if (!pc) return;
 
     if (pc.connectionState === 'connected') {
-      // Connected, but not necessarily decoding yet -- wait for 'playing'.
       setStatus('wait', 'Receiving...');
       retryDelay = 1000;
     } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-      // A camera feed should survive a network blip. Back off so a hard failure
-      // (no route to the peer) does not spin.
       setStatus('wait', 'Reconnecting...');
       loader.hidden = false;
       loaderText.textContent = 'Reconnecting...';
-      setTimeout(connect, retryDelay);
+      const target = name;
+      setTimeout(() => { if (current === target) connect(target); }, retryDelay);
       retryDelay = Math.min(retryDelay * 2, 15000);
     }
   };
@@ -307,65 +387,54 @@ async function connect() {
   try {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-
-    // Wait for ICE gathering to finish so the offer carries every candidate.
-    // Trickling them separately is possible but this is simpler and the delay
-    // is a few hundred ms at most on a LAN.
     await iceGatheringComplete(pc);
 
-    const res = await fetch('/webrtc/whep', {
+    const res = await fetch(`/webrtc/whep/${encodeURIComponent(name)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/sdp' },
       body: pc.localDescription.sdp,
     });
 
-    if (res.status === 401) {
-      // Session expired mid-watch.
-      location.reload();
-      return;
-    }
-
-    if (!res.ok) {
-      throw new Error(`server returned ${res.status}`);
-    }
+    if (res.status === 401) { location.reload(); return; }
+    if (!res.ok) throw new Error(`server returned ${res.status}`);
 
     const answer = await res.text();
     await pc.setRemoteDescription({ type: 'answer', sdp: answer });
 
-    // Connected but never decoding is the grey-screen failure. Detect it via
-    // framesDecoded rather than leaving the viewer staring at a blank rectangle.
-    watchForFrames();
+    watchForFrames(name);
   } catch (err) {
     setStatus('error', 'Connection failed');
     loader.hidden = false;
     loaderText.textContent = 'Could not connect to the camera.';
     loaderHint.textContent = err.message;
-    setTimeout(connect, retryDelay);
+    const target = name;
+    setTimeout(() => { if (current === target) connect(target); }, retryDelay);
     retryDelay = Math.min(retryDelay * 2, 15000);
   }
 }
 
+function onPlaying() {
+  loader.hidden = true;
+  setStatus('live', 'Live');
+  retryDelay = 1000;
+}
+
 /**
- * A peer connection can be "connected" while zero frames ever decode -- a codec
- * mismatch, a track that never arrives. The symptom is a grey rectangle and a
- * green "Live" dot, which tells the viewer nothing. Read framesDecoded from the
- * stats and say what is actually happening.
+ * A peer connection can be "connected" while zero frames decode -- codec
+ * mismatch, dead track. The symptom is a grey rectangle with a green dot.
+ * Read framesDecoded and say what is actually happening.
  */
-function watchForFrames() {
+function watchForFrames(name) {
   const peer = pc;
   let elapsed = 0;
 
   const timer = setInterval(async () => {
-    if (!pc || pc !== peer) {
-      clearInterval(timer);
-      return;
-    }
+    if (!pc || pc !== peer || current !== name) { clearInterval(timer); return; }
 
     elapsed += 2;
 
     let decoded = 0;
     let received = 0;
-
     const stats = await pc.getStats();
     stats.forEach((r) => {
       if (r.type === 'inbound-rtp' && r.kind === 'video') {
@@ -374,10 +443,7 @@ function watchForFrames() {
       }
     });
 
-    if (decoded > 0) {
-      clearInterval(timer); // frames are flowing; nothing to report
-      return;
-    }
+    if (decoded > 0) { clearInterval(timer); return; }
 
     if (elapsed >= 8) {
       clearInterval(timer);
@@ -386,7 +452,7 @@ function watchForFrames() {
       loaderText.textContent = 'Connected, but no video is decoding.';
       loaderHint.textContent =
         received > 0
-          ? `Receiving data (${Math.round(received / 1024)} KB) but decoding no frames - the camera may be sending a codec this browser cannot play (e.g. H.265).`
+          ? `Receiving data (${Math.round(received / 1024)} KB) but decoding no frames - the camera may be sending a format this browser cannot play.`
           : 'No video data is arriving. The connection is open but the camera track never started.';
     }
   }, 2000);
@@ -394,28 +460,23 @@ function watchForFrames() {
 
 function iceGatheringComplete(peer) {
   if (peer.iceGatheringState === 'complete') return Promise.resolve();
-
   return new Promise((resolve) => {
-    // Don't hang forever if a STUN server is unreachable -- the candidates we
-    // already have (usually host/LAN ones) are often enough.
     const timer = setTimeout(resolve, 3000);
-
     peer.addEventListener('icegatheringstatechange', () => {
-      if (peer.iceGatheringState === 'complete') {
-        clearTimeout(timer);
-        resolve();
-      }
+      if (peer.iceGatheringState === 'complete') { clearTimeout(timer); resolve(); }
     });
   });
 }
 
 function cleanup() {
+  video.removeEventListener('playing', onPlaying);
   if (pc) {
     pc.onconnectionstatechange = null;
     pc.ontrack = null;
     pc.close();
     pc = null;
   }
+  video.srcObject = null;
 }
 
 window.addEventListener('beforeunload', cleanup);
