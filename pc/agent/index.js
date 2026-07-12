@@ -90,7 +90,12 @@ function ffmpegArgs(startNumber = 0) {
     '-start_number', String(startNumber),
     // No delete_segments: we delete from Blob ourselves, and we need the local
     // file to still exist when we get around to uploading it.
-    '-hls_flags', 'append_list+omit_endlist',
+    //
+    // No append_list either: it appends to the playlist left over from the
+    // previous run, so a reconnecting ffmpeg re-advertises segments that are
+    // already gone. We publish our own playlist from confirmed uploads anyway,
+    // so ffmpeg's copy of it only needs to describe the current run.
+    '-hls_flags', 'omit_endlist+independent_segments',
     '-hls_segment_type', 'mpegts',
     '-hls_segment_filename', path.join(WORK_DIR, 'seg%05d.ts'),
     path.join(WORK_DIR, 'local.m3u8'),

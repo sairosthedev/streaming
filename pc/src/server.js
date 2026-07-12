@@ -105,11 +105,22 @@ function ffmpegArgs() {
     // wider window is free. 10 x 2s = 20s of slack.
     '-hls_list_size', '10',
 
-    // delete_segments keeps the folder from growing without bound;
-    // append_list + omit_endlist keep the playlist looking live to the player.
-    '-hls_flags', 'delete_segments+append_list+omit_endlist',
+    // Do NOT let ffmpeg delete segments.
+    //
+    // delete_segments races the playlist: ffmpeg rewrites stream.m3u8 and unlinks
+    // old .ts files as separate, non-atomic steps, so a player that fetched the
+    // playlist a moment ago routinely asks for a segment that has just been
+    // deleted and gets a 404. hls_delete_threshold is supposed to leave a margin
+    // and does not reliably do so. append_list made it worse still, re-advertising
+    // names from a previous run that were already gone.
+    //
+    // Instead we sweep old segments ourselves (see reapSegments), well behind the
+    // playlist window and never a file the playlist still names. Local disk is
+    // free; correctness is not.
+    '-hls_flags', 'omit_endlist+independent_segments',
+
     '-hls_segment_type', 'mpegts',
-    '-hls_segment_filename', path.join(HLS_DIR, 'seg%03d.ts'),
+    '-hls_segment_filename', path.join(HLS_DIR, 'seg%05d.ts'),
     path.join(HLS_DIR, 'stream.m3u8'),
   );
 
@@ -125,6 +136,17 @@ function startFfmpeg() {
     lastFfmpegError = installHint('ffmpeg').replace(/\n\s*/g, ' ');
     console.error(`\n  ${installHint('ffmpeg')}\n`);
     return;
+  }
+
+  // Clear stale segments on every start, not just the first. Without append_list
+  // ffmpeg restarts numbering at seg00000 after a reconnect, so leftovers from
+  // the previous run would collide by name and be served as if they were current.
+  try {
+    for (const f of fs.readdirSync(HLS_DIR)) {
+      fs.rmSync(path.join(HLS_DIR, f), { force: true });
+    }
+  } catch {
+    fs.mkdirSync(HLS_DIR, { recursive: true });
   }
 
   console.log(`[ffmpeg] connecting to ${safeUrl} (${RTSP_TRANSPORT}, ${VIDEO_MODE})`);
@@ -173,6 +195,50 @@ function startFfmpeg() {
     restartTimer = setTimeout(startFfmpeg, delay);
   });
 }
+
+/**
+ * Delete old segments ourselves, because ffmpeg's delete_segments races its own
+ * playlist and hands the player 404s.
+ *
+ * The rule that makes this safe: never delete a file the current playlist still
+ * names, and give anything it has just dropped a grace period, since a player
+ * may be holding a slightly stale copy of the playlist and still be fetching
+ * from it.
+ */
+const GRACE_MS = 30_000;
+
+function reapSegments() {
+  let playlist = '';
+  try {
+    playlist = fs.readFileSync(path.join(HLS_DIR, 'stream.m3u8'), 'utf8');
+  } catch {
+    return; // no playlist yet -- nothing is safe to delete
+  }
+
+  const listed = new Set(playlist.match(/seg\d+\.ts/g) ?? []);
+  const now = Date.now();
+
+  let files;
+  try {
+    files = fs.readdirSync(HLS_DIR).filter((f) => f.endsWith('.ts'));
+  } catch {
+    return;
+  }
+
+  for (const name of files) {
+    if (listed.has(name)) continue; // still advertised -- a player may want it
+
+    const file = path.join(HLS_DIR, name);
+    try {
+      // mtime, not ctime: we want "how long since ffmpeg finished writing it".
+      if (now - fs.statSync(file).mtimeMs > GRACE_MS) fs.rmSync(file, { force: true });
+    } catch {
+      // Racing ffmpeg or a reader; it will come round again in 5s.
+    }
+  }
+}
+
+setInterval(reapSegments, 5000).unref();
 
 function stopFfmpeg() {
   clearTimeout(restartTimer);
