@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Package Guard</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --line: #262b36;
+      --text: #e6e8ec; --dim: #8b93a3;
+      --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+      font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+    }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    .sub { color: var(--dim); margin-bottom: 20px; font-size: 13px; }
+    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+    .panel {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 10px; padding: 16px;
+    }
+    img.live { width: 100%; border-radius: 8px; display: block; background: #000; }
+
+    .status {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 600; font-size: 17px; margin-bottom: 14px;
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dim); }
+    .dot.ok { background: var(--ok); }
+    .dot.warn { background: var(--warn); }
+    .dot.bad { background: var(--bad); animation: pulse 1s infinite; }
+    @keyframes pulse { 50% { opacity: .3; } }
+
+    .rows { display: grid; gap: 8px; font-size: 14px; }
+    .row { display: flex; justify-content: space-between; }
+    .row span:first-child { color: var(--dim); }
+
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em;
+         color: var(--dim); margin: 22px 0 10px; }
+
+    .event {
+      border-left: 3px solid var(--line); padding: 8px 0 8px 12px;
+      margin-bottom: 10px; font-size: 14px;
+    }
+    .event.THEFT { border-color: var(--bad); }
+    .event.delivered { border-color: var(--ok); }
+    .event.collected { border-color: var(--dim); }
+    .event .kind { font-weight: 600; }
+    .event.THEFT .kind { color: var(--bad); }
+    .event time { color: var(--dim); font-size: 12px; margin-left: 8px; }
+    .event .detail { color: var(--dim); font-size: 13px; }
+    .event a { color: var(--warn); font-size: 12px; text-decoration: none; }
+    .event a:hover { text-decoration: underline; }
+
+    .banner {
+      background: #3b1d1d; border: 1px solid var(--bad); color: #fca5a5;
+      padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px;
+    }
+    .empty { color: var(--dim); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Package Guard</h1>
+  <div class="sub">Watching the doorstep for packages that leave without you.</div>
+
+  <div id="faces-warning"></div>
+
+  <div class="grid">
+    <div class="panel">
+      <img class="live" src="/stream" alt="live camera">
+    </div>
+
+    <div>
+      <div class="panel">
+        <div class="status">
+          <span class="dot" id="dot"></span>
+          <span id="status">connecting…</span>
+        </div>
+        <div class="rows">
+          <div class="row"><span>Package on doorstep</span><b id="pkg">—</b></div>
+          <div class="row"><span>People in frame</span><b id="people">—</b></div>
+          <div class="row"><span>Recognised</span><b id="face">—</b></div>
+          <div class="row"><span>Known faces</span><b id="known">—</b></div>
+        </div>
+      </div>
+
+      <h2>Events</h2>
+      <div id="events"><div class="empty">Nothing yet.</div></div>
+    </div>
+  </div>
+
+<script>
+const DOT = { THEFT: 'bad', package_present: 'warn', watching: 'ok' };
+
+async function tick() {
+  let s;
+  try {
+    s = await (await fetch('/api/state')).json();
+  } catch {
+    return;
+  }
+
+  document.getElementById('status').textContent =
+    s.status === 'THEFT' ? 'THEFT DETECTED' :
+    s.status === 'package_present' ? 'Package on doorstep' :
+    s.status === 'watching' ? 'Watching' : s.status;
+
+  document.getElementById('dot').className = 'dot ' + (DOT[s.status] ?? '');
+  document.getElementById('pkg').textContent = s.package_present ? 'yes' : 'no';
+  document.getElementById('people').textContent = s.people_in_frame;
+  document.getElementById('face').textContent = s.known_face ?? '—';
+  document.getElementById('known').textContent =
+    s.known_names.length ? s.known_names.join(', ') : 'none registered';
+
+  // A detector that cannot tell you from a thief will alarm on every pickup.
+  // Say so, rather than letting it look like it is working.
+  const warn = document.getElementById('faces-warning');
+  if (!s.faces_available) {
+    warn.innerHTML = '<div class="banner">Face recognition is not installed — '
+      + 'every collection, including your own, will be reported as a theft. '
+      + 'See guard/README.md.</div>';
+  } else if (!s.known_names.length) {
+    warn.innerHTML = '<div class="banner">No known faces registered — any '
+      + 'collection will alarm. Drop a photo into guard/known_faces/.</div>';
+  } else {
+    warn.innerHTML = '';
+  }
+
+  const box = document.getElementById('events');
+  if (!s.events.length) {
+    box.innerHTML = '<div class="empty">Nothing yet.</div>';
+    return;
+  }
+  box.innerHTML = s.events.map(e => `
+    <div class="event ${e.kind}">
+      <span class="kind">${e.kind}</span><time>${e.at}</time>
+      <div class="detail">${e.detail}</div>
+      ${e.snapshot ? `<a href="/events/${e.snapshot}" target="_blank">snapshot</a>` : ''}
+      ${e.clip ? `<a href="/events/${e.clip}" target="_blank">clip</a>` : ''}
+    </div>`).join('');
+}
+
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

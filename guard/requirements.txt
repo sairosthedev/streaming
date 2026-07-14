@@ -1,0 +1,9 @@
+opencv-python
+numpy
+ultralytics
+flask
+# Face recognition. dlib-bin is a prebuilt wheel so no C++ compiler is needed on
+# Windows; plain `dlib` would try to compile and usually fails. If both are
+# unavailable the detector still runs -- it just treats every pickup as a theft.
+dlib-bin
+face_recognition

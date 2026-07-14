@@ -77,6 +77,25 @@ export async function addCamera({ name, label, rtspUrl, transport = 'tcp', trans
   });
 }
 
+/** Change an existing camera's RTSP URL. Cameras move when a router hands out a new lease. */
+export async function updateCameraUrl(name, rtspUrl) {
+  const col = await collection();
+  const r = await col.updateOne({ name }, { $set: { rtspUrl } });
+  if (!r.matchedCount) throw new Error(`no camera named "${name}"`);
+}
+
+/** Rename a camera. The name is its URL: /<name>.mp4 and ?cam=<name>. */
+export async function renameCamera(from, to) {
+  if (!NAME_RE.test(to)) {
+    throw new Error(`name must match ${NAME_RE} (lowercase letters, digits, dashes)`);
+  }
+  const col = await collection();
+  if (await col.findOne({ name: to })) throw new Error(`camera "${to}" already exists`);
+
+  const r = await col.updateOne({ name: from }, { $set: { name: to } });
+  if (!r.matchedCount) throw new Error(`no camera named "${from}"`);
+}
+
 export async function listAll() {
   const col = await collection();
   return col.find({}).sort({ createdAt: 1 }).toArray();

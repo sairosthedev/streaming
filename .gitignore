@@ -13,3 +13,11 @@ pc/bin/
 *.log
 .DS_Store
 Thumbs.db
+
+# Package guard: model weights (downloaded on first run), saved theft clips,
+# and the private photos used to recognise known people. None belong in git.
+guard/*.pt
+guard/events/
+guard/known_faces/*.jpg
+guard/known_faces/*.jpeg
+guard/known_faces/*.png

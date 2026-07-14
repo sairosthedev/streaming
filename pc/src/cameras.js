@@ -3,6 +3,8 @@
  *
  *   npm run cameras -- list
  *   npm run cameras -- add <name> "<label>" <rtspUrl> [--udp] [--passthrough]
+ *   npm run cameras -- set-url <name> <rtspUrl>
+ *   npm run cameras -- rename <old-name> <new-name>
  *   npm run cameras -- disable <name>
  *   npm run cameras -- enable <name>
  *   npm run cameras -- remove <name>
@@ -15,7 +17,7 @@
  * for cameras like Dahuas that emit full-range yuvj420p, which browsers render
  * as a grey screen without re-encoding.
  */
-import { dbConfigured, getCameras, addCamera, listAll, setEnabled, removeCamera, closeDb } from './db.js';
+import { dbConfigured, getCameras, addCamera, updateCameraUrl, renameCamera, listAll, setEnabled, removeCamera, closeDb } from './db.js';
 
 if (!dbConfigured()) {
   console.error('\n  MONGODB_URI is not set in .env - the camera registry needs it.\n');
@@ -70,6 +72,29 @@ try {
       break;
     }
 
+    case 'set-url': {
+      const [name, rtspUrl] = rest;
+      if (!name || !rtspUrl) {
+        console.error('\n  usage: npm run cameras -- set-url <name> <rtspUrl>\n');
+        process.exit(1);
+      }
+      await updateCameraUrl(name, rtspUrl);
+      console.log(`\n  Updated "${name}" -> ${maskUrl(rtspUrl)}\n  Restart the server to apply:\n    npm run camera\n`);
+      break;
+    }
+
+    case 'rename': {
+      const [from, to] = rest;
+      if (!from || !to) {
+        console.error('\n  usage: npm run cameras -- rename <old-name> <new-name>\n');
+        process.exit(1);
+      }
+      await renameCamera(from, to);
+      console.log(`\n  Renamed "${from}" -> "${to}". It is now served at /${to}.mp4`);
+      console.log(`  Restart the server to apply:\n    npm run camera\n`);
+      break;
+    }
+
     case 'disable':
     case 'enable': {
       const [name] = rest;
@@ -91,6 +116,8 @@ try {
       console.log('\n  usage:');
       console.log('    npm run cameras -- list');
       console.log('    npm run cameras -- add <name> "<label>" <rtspUrl> [--udp] [--passthrough]');
+      console.log('    npm run cameras -- set-url <name> <rtspUrl>');
+      console.log('    npm run cameras -- rename <old-name> <new-name>');
       console.log('    npm run cameras -- disable <name>');
       console.log('    npm run cameras -- enable <name>');
       console.log('    npm run cameras -- remove <name>\n');

@@ -27,6 +27,14 @@ const PORT = Number(process.env.PORT || 8080);
 const VIEW_PASSWORD = process.env.VIEW_PASSWORD || '';
 const TRANSCODE_BITRATE = process.env.TRANSCODE_BITRATE || '3000k';
 
+/**
+ * Shared secret for the /<name>.mp4 endpoints. Machines consuming those URLs
+ * cannot do the cookie login, so they authenticate with ?key=<STREAM_KEY>.
+ * Unset means the .mp4 endpoints are off entirely -- an open camera feed should
+ * never be something you get by forgetting to set a variable.
+ */
+const STREAM_KEY = process.env.STREAM_KEY || '';
+
 // MediaMTX's own ports. Bound to localhost -- everything reaches them through
 // this server, so the password gate cannot be bypassed by hitting them directly.
 const MTX_WEBRTC_PORT = 8889;
@@ -439,6 +447,71 @@ app.patch('/webrtc/session', requireAuth, express.text({ type: '*/*', limit: '1m
   } catch {
     res.status(502).end();
   }
+});
+
+// ---------------------------------------------------------------------------
+// /<name>.mp4 -- the live feed as a plain HTTP video URL, for anything that
+// won't speak WebRTC: a bare <video src>, VLC, an NVR, another site.
+//
+// Fragmented MP4 (frag_keyframe+empty_moov) is what makes this work. A normal
+// MP4 puts its index (the moov atom) at the end, so it cannot be written until
+// the file is complete -- useless for a stream that never ends. Fragmented MP4
+// emits self-contained chunks instead, and the response simply never closes.
+//
+// The source is the transcoded path, not raw-<name>: it is already the yuv420p
+// that browsers will decode, so this copies it (-c copy) at near-zero CPU
+// rather than encoding again per viewer.
+// ---------------------------------------------------------------------------
+
+/** Constant-time compare so the key can't be guessed a character at a time. */
+function keyIsValid(supplied) {
+  const a = Buffer.from(String(supplied ?? ''));
+  const b = Buffer.from(STREAM_KEY);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+app.get('/:cam.mp4', (req, res) => {
+  if (!STREAM_KEY) {
+    return res.status(404).json({ error: 'set STREAM_KEY in .env to enable .mp4 URLs' });
+  }
+
+  // A browser cookie is fine too, so the feed still plays in a logged-in tab.
+  const { session } = parseCookies(req.headers.cookie);
+  const authed = (VIEW_PASSWORD && tokenIsValid(session)) || keyIsValid(req.query.key);
+  if (!authed) return res.status(401).json({ error: 'unauthorized' });
+
+  const cam = cameras.find((c) => c.name === req.params.cam);
+  if (!cam) return res.status(404).json({ error: 'no such camera' });
+
+  const bin = which('ffmpeg');
+  if (!bin) return res.status(500).json({ error: 'ffmpeg not installed' });
+
+  const ff = spawn(bin, [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-rtsp_transport', 'tcp',
+    '-i', `rtsp://127.0.0.1:${MTX_RTSP_PORT}/${cam.name}`,
+    '-c:v', 'copy',
+    '-an',
+    '-f', 'mp4',
+    // empty_moov: start writing immediately, no index up front.
+    // frag_keyframe: cut a fragment at each keyframe, so players can begin
+    // mid-stream. default_base_moof: what Chrome/Safari's MSE expects.
+    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+    'pipe:1',
+  ], { windowsHide: true });
+
+  res.setHeader('Content-Type', 'video/mp4');
+  res.setHeader('Cache-Control', 'no-store');
+
+  ff.stdout.pipe(res);
+  ff.stderr.on('data', (d) => console.error(`[mp4:${cam.name}]`, d.toString().trim()));
+
+  // One ffmpeg per viewer: it must die with the request, or every disconnect
+  // leaks a process that keeps pulling video forever.
+  const kill = () => ff.kill('SIGKILL'); // SIGTERM is a no-op for ffmpeg on Windows
+  res.on('close', kill);
+  ff.on('close', () => res.end());
 });
 
 app.use(express.static(path.join(ROOT, 'public-webrtc')));
