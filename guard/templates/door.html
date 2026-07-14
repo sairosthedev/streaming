@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Door Watch</title>
+  <style>
+    :root {
+      --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e8ec;
+      --dim:#8b93a3; --ok:#34d399; --bad:#f87171;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; padding:24px; background:var(--bg); color:var(--text);
+           font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+    h1 { margin:0 0 4px; font-size:20px; }
+    .sub { color:var(--dim); margin-bottom:20px; font-size:13px; }
+    .grid { display:grid; grid-template-columns:2fr 1fr; gap:20px; }
+    @media (max-width:900px){ .grid{ grid-template-columns:1fr; } }
+    .panel { background:var(--panel); border:1px solid var(--line);
+             border-radius:10px; padding:16px; }
+    img.live { width:100%; border-radius:8px; display:block; background:#000; }
+    .status { display:flex; align-items:center; gap:10px; font-weight:600;
+              font-size:22px; margin-bottom:14px; }
+    .dot { width:12px; height:12px; border-radius:50%; background:var(--dim); }
+    .dot.ok { background:var(--ok); }
+    .dot.bad { background:var(--bad); animation:pulse 1s infinite; }
+    @keyframes pulse { 50%{ opacity:.3; } }
+    .rows { display:grid; gap:8px; font-size:14px; }
+    .row { display:flex; justify-content:space-between; }
+    .row span:first-child { color:var(--dim); }
+    .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin-top:4px; }
+    .bar>div { height:100%; background:var(--ok); transition:width .2s,background .2s; }
+    h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em;
+         color:var(--dim); margin:22px 0 10px; }
+    .event { border-left:3px solid var(--line); padding:8px 0 8px 12px;
+             margin-bottom:10px; font-size:14px; }
+    .event.opened { border-color:var(--bad); }
+    .event.closed { border-color:var(--dim); }
+    .event .kind { font-weight:600; }
+    .event.opened .kind { color:var(--bad); }
+    .event time { color:var(--dim); font-size:12px; margin-left:8px; }
+    .event a { color:#fbbf24; font-size:12px; text-decoration:none; margin-right:10px; }
+    .event a:hover { text-decoration:underline; }
+    .empty { color:var(--dim); font-size:13px; }
+    .tip { background:#16241f; border:1px solid #245; color:#9fe;
+           padding:10px 12px; border-radius:8px; font-size:13px; margin-bottom:16px; }
+    code { background:#0b0d11; padding:1px 6px; border-radius:4px; }
+  </style>
+</head>
+<body>
+  <h1>Door Watch</h1>
+  <div class="sub">Alerts you the moment the door opens.</div>
+
+  {% if topic %}
+  <div class="tip">
+    Phone alerts: install the <b>ntfy</b> app, and subscribe to the topic
+    <code>{{ topic }}</code> (server ntfy.sh). You'll get a push whenever the
+    door opens.
+  </div>
+  {% endif %}
+
+  <div class="grid">
+    <div class="panel">
+      <img class="live" src="/stream" alt="live camera">
+    </div>
+    <div>
+      <div class="panel">
+        <div class="status">
+          <span class="dot" id="dot"></span>
+          <span id="status">connecting…</span>
+        </div>
+        <div class="rows">
+          <div class="row"><span>Connected</span><b id="conn">—</b></div>
+          <div class="row"><span>Change in door area</span><b id="chg">—</b></div>
+          <div class="bar"><div id="chgbar" style="width:0"></div></div>
+        </div>
+      </div>
+      <h2>Events</h2>
+      <div id="events"><div class="empty">Nothing yet.</div></div>
+    </div>
+  </div>
+
+<script>
+async function tick() {
+  let s;
+  try { s = await (await fetch('/api/state')).json(); } catch { return; }
+
+  document.getElementById('status').textContent =
+    s.status === 'open' ? 'DOOR OPEN' :
+    s.status === 'closed' ? 'Door closed' : s.status;
+  document.getElementById('dot').className =
+    'dot ' + (s.door_open ? 'bad' : s.connected ? 'ok' : '');
+  document.getElementById('conn').textContent = s.connected ? 'yes' : 'no';
+
+  const pct = Math.min(100, Math.round(s.change * 100));
+  const thr = Math.round(s.threshold * 100);
+  document.getElementById('chg').textContent = pct + '% (opens at ' + thr + '%)';
+  const bar = document.getElementById('chgbar');
+  bar.style.width = pct + '%';
+  bar.style.background = s.door_open ? 'var(--bad)' : 'var(--ok)';
+
+  const box = document.getElementById('events');
+  if (!s.events.length) { box.innerHTML = '<div class="empty">Nothing yet.</div>'; return; }
+  box.innerHTML = s.events.map(e => `
+    <div class="event ${e.kind}">
+      <span class="kind">${e.kind === 'opened' ? 'Door opened' : 'Door closed'}</span>
+      <time>${e.at}</time>
+      ${e.snapshot ? `<div><a href="/events/${e.snapshot}" target="_blank">snapshot</a>
+      ${e.clip ? `<a href="/events/${e.clip}" target="_blank">clip</a>` : ''}</div>` : ''}
+    </div>`).join('');
+}
+tick();
+setInterval(tick, 500);
+</script>
+</body>
+</html>

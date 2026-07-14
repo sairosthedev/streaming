@@ -7,3 +7,8 @@ flask
 # unavailable the detector still runs -- it just treats every pickup as a theft.
 dlib-bin
 face_recognition
+face_recognition_models
+# face_recognition_models still imports pkg_resources, which modern Python no
+# longer ships by default. setuptools provides it. Without this you get a
+# misleading "install face_recognition_models" error even when it IS installed.
+setuptools<81

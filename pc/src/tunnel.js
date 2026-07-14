@@ -43,6 +43,7 @@ console.log(
 const proc = spawn(bin, args, { windowsHide: true });
 
 let announced = false;
+const startupLog = [];
 
 function announce(url) {
   announced = true;
@@ -69,6 +70,9 @@ function scan(chunk) {
   const text = chunk.toString();
 
   if (!announced) {
+    startupLog.push(text);
+    if (startupLog.length > 100) startupLog.shift();
+
     if (named) {
       // A named tunnel never prints its hostname; it logs connection
       // registrations instead. First registered connection = live.
@@ -84,15 +88,26 @@ function scan(chunk) {
       }
     }
   }
-
-  // Surface real errors; drop cloudflared's routine chatter.
-  if (/ERR|error|failed/i.test(text) && !announced) process.stderr.write(text);
 }
 
 proc.stdout.on('data', scan);
 proc.stderr.on('data', scan);
 
 proc.on('close', (code) => {
+  // Died before going live: show cloudflared's own output, which names the
+  // actual problem (missing credentials, DNS, auth, ...).
+  if (!announced && code) {
+    process.stderr.write(`\n${startupLog.join('')}\n`);
+    if (named) {
+      console.error(
+        `  The named tunnel "${TUNNEL_NAME}" could not start. If this is a machine that\n` +
+          '  has not run this tunnel before, copy cert.pem and the <tunnel-id>.json\n' +
+          '  credentials file from the .cloudflared folder in the home directory of the\n' +
+          '  machine where you ran "cloudflared tunnel create" into the .cloudflared\n' +
+          '  folder in this machine\'s home directory, then retry.\n',
+      );
+    }
+  }
   console.log(`\n  Tunnel closed (code ${code}). The public URL no longer works.\n`);
   process.exit(code ?? 0);
 });
