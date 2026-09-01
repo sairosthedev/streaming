@@ -4,6 +4,7 @@
  *   npm run cameras -- list
  *   npm run cameras -- add <name> "<label>" <rtspUrl> [--udp] [--passthrough]
  *   npm run cameras -- set-url <name> <rtspUrl>
+ *   npm run cameras -- set-mode <name> transcode|passthrough
  *   npm run cameras -- rename <old-name> <new-name>
  *   npm run cameras -- disable <name>
  *   npm run cameras -- enable <name>
@@ -17,7 +18,7 @@
  * for cameras like Dahuas that emit full-range yuvj420p, which browsers render
  * as a grey screen without re-encoding.
  */
-import { dbConfigured, getCameras, addCamera, updateCameraUrl, renameCamera, listAll, setEnabled, removeCamera, closeDb } from './db.js';
+import { dbConfigured, getCameras, addCamera, updateCameraUrl, renameCamera, listAll, setEnabled, setTranscode, removeCamera, closeDb } from './db.js';
 
 if (!dbConfigured()) {
   console.error('\n  MONGODB_URI is not set in .env - the camera registry needs it.\n');
@@ -104,6 +105,17 @@ try {
       break;
     }
 
+    case 'set-mode': {
+      const [name, mode] = rest;
+      if (!name || (mode !== 'transcode' && mode !== 'passthrough')) {
+        console.error('\n  usage: npm run cameras -- set-mode <name> transcode|passthrough\n');
+        process.exit(1);
+      }
+      await setTranscode(name, mode === 'transcode');
+      console.log(`\n  "${name}" -> ${mode}. Restart the server to apply.\n`);
+      break;
+    }
+
     case 'remove': {
       const [name] = rest;
       if (!name) { console.error('\n  usage: npm run cameras -- remove <name>\n'); process.exit(1); }
@@ -117,6 +129,7 @@ try {
       console.log('    npm run cameras -- list');
       console.log('    npm run cameras -- add <name> "<label>" <rtspUrl> [--udp] [--passthrough]');
       console.log('    npm run cameras -- set-url <name> <rtspUrl>');
+      console.log('    npm run cameras -- set-mode <name> transcode|passthrough');
       console.log('    npm run cameras -- rename <old-name> <new-name>');
       console.log('    npm run cameras -- disable <name>');
       console.log('    npm run cameras -- enable <name>');

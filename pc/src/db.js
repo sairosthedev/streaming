@@ -107,6 +107,12 @@ export async function setEnabled(name, enabled) {
   if (!r.matchedCount) throw new Error(`no camera named "${name}"`);
 }
 
+export async function setTranscode(name, transcode) {
+  const col = await collection();
+  const r = await col.updateOne({ name }, { $set: { transcode } });
+  if (!r.matchedCount) throw new Error(`no camera named "${name}"`);
+}
+
 export async function removeCamera(name) {
   const col = await collection();
   const r = await col.deleteOne({ name });
