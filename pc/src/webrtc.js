@@ -12,6 +12,7 @@ import './env.js';
 import express from 'express';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +21,12 @@ import { dbConfigured, getCameras } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
-const MTX_BIN = path.join(ROOT, 'bin', 'mediamtx.exe');
+
+// The release ships as mediamtx.exe on Windows and plain `mediamtx` elsewhere.
+// Hardcoding the .exe made this fail on Linux (Raspberry Pi) with a "not found"
+// error even though `npm run setup` had just installed it correctly.
+const MTX_EXE = os.platform() === 'win32' ? 'mediamtx.exe' : 'mediamtx';
+const MTX_BIN = path.join(ROOT, 'bin', MTX_EXE);
 const MTX_CONF = path.join(ROOT, 'bin', 'mediamtx.generated.yml');
 
 const PORT = Number(process.env.PORT || 8080);
@@ -42,7 +48,7 @@ const MTX_API_PORT = 9997;
 const MTX_RTSP_PORT = 8554;
 
 if (!fs.existsSync(MTX_BIN)) {
-  console.error(`\n  mediamtx.exe not found at ${MTX_BIN}`);
+  console.error(`\n  ${MTX_EXE} not found at ${MTX_BIN}`);
   console.error('  Run: npm run setup\n');
   process.exit(1);
 }

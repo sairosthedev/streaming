@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Multi-Camera Streaming Architecture</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm; }
+
+  :root {
+    --ink:      #12161c;
+    --body:     #333b47;
+    --muted:    #6b7684;
+    --rule:     #dfe3e8;
+    --accent:   #1e5fbf;
+    --accentbg: #eef4fd;
+    --warnbg:   #fdf4e6;
+    --warnln:   #d08700;
+    --okbg:     #edf7ee;
+    --okln:     #2e7d32;
+    --codebg:   #f5f6f8;
+    --mono: "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+    --sans: "Segoe UI", -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: var(--sans);
+    color: var(--body);
+    font-size: 10.2pt;
+    line-height: 1.55;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- page structure ---------- */
+  .page { page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+  h1, h2, h3 { color: var(--ink); page-break-after: avoid; }
+  figure, table, .box, .card { page-break-inside: avoid; }
+
+  /* ---------- cover ---------- */
+  .cover {
+    height: 250mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .cover .eyebrow {
+    font-size: 8.5pt; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600; margin-bottom: 14mm;
+  }
+  .cover h1 {
+    font-size: 30pt; line-height: 1.15; margin: 0 0 6mm;
+    letter-spacing: -.02em; font-weight: 650;
+  }
+  .cover .sub {
+    font-size: 12.5pt; color: var(--muted); margin: 0 0 16mm; max-width: 130mm;
+    line-height: 1.5;
+  }
+  .cover .rule { height: 3px; width: 54mm; background: var(--accent); margin-bottom: 12mm; }
+  .cover dl { display: grid; grid-template-columns: 34mm 1fr; gap: 2.5mm 0; margin: 0; font-size: 9.5pt; }
+  .cover dt { color: var(--muted); }
+  .cover dd { margin: 0; color: var(--ink); font-weight: 500; }
+
+  /* ---------- headings ---------- */
+  h2 {
+    font-size: 16pt; margin: 0 0 1mm; letter-spacing: -.01em; font-weight: 650;
+  }
+  .h2sub { color: var(--muted); font-size: 9.5pt; margin: 0 0 7mm; }
+  h2 + .h2sub { margin-top: 0; }
+  h3 {
+    font-size: 11pt; margin: 7mm 0 2.5mm; font-weight: 620;
+  }
+  h3:first-of-type { margin-top: 0; }
+  .secnum {
+    display: inline-block; color: var(--accent); font-variant-numeric: tabular-nums;
+    margin-right: 3mm; font-weight: 650;
+  }
+
+  p { margin: 0 0 3.5mm; }
+  ul, ol { margin: 0 0 3.5mm; padding-left: 5mm; }
+  li { margin-bottom: 1.4mm; }
+  strong { color: var(--ink); font-weight: 620; }
+  code {
+    font-family: var(--mono); font-size: .88em;
+    background: var(--codebg); padding: .5mm 1.2mm; border-radius: 2px;
+    color: var(--ink);
+  }
+
+  /* ---------- code blocks ---------- */
+  pre {
+    font-family: var(--mono); font-size: 8.4pt; line-height: 1.5;
+    background: var(--codebg); border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 3px; padding: 3.5mm 4mm; margin: 0 0 4mm;
+    white-space: pre-wrap; word-break: break-word; color: var(--ink);
+    page-break-inside: avoid;
+  }
+  pre .c { color: var(--muted); }
+
+  /* ---------- diagrams ---------- */
+  figure { margin: 0 0 5mm; }
+  figure pre {
+    background: #fff; border: 1px solid var(--rule); border-left: 1px solid var(--rule);
+    font-size: 8pt; line-height: 1.42; padding: 5mm; text-align: center;
+    white-space: pre; overflow-x: hidden;
+  }
+  figcaption {
+    font-size: 8.3pt; color: var(--muted); text-align: center; margin-top: 2mm;
+  }
+
+  /* ---------- callouts ---------- */
+  .box {
+    border-radius: 3px; padding: 3.5mm 4mm; margin: 0 0 4.5mm;
+    font-size: 9.4pt; border: 1px solid var(--rule); background: var(--accentbg);
+    border-left: 3px solid var(--accent);
+  }
+  .box.warn { background: var(--warnbg); border-left-color: var(--warnln); }
+  .box.ok   { background: var(--okbg);   border-left-color: var(--okln); }
+  .box p:last-child { margin-bottom: 0; }
+  .box .lbl {
+    display: block; font-size: 7.6pt; letter-spacing: .14em; text-transform: uppercase;
+    font-weight: 680; margin-bottom: 1.5mm; color: var(--accent);
+  }
+  .box.warn .lbl { color: var(--warnln); }
+  .box.ok   .lbl { color: var(--okln); }
+
+  /* ---------- tables ---------- */
+  table { width: 100%; border-collapse: collapse; margin: 0 0 4.5mm; font-size: 9.2pt; }
+  th {
+    text-align: left; font-weight: 620; color: var(--ink);
+    border-bottom: 1.5px solid var(--ink); padding: 2mm 2.5mm 1.8mm; font-size: 8.6pt;
+    letter-spacing: .03em;
+  }
+  td { padding: 2mm 2.5mm; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td code { font-size: 8.2pt; background: none; padding: 0; }
+  tr:last-child td { border-bottom: none; }
+  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* ---------- cards ---------- */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin-bottom: 5mm; }
+  .card {
+    border: 1px solid var(--rule); border-radius: 3px; padding: 3.5mm 4mm;
+    background: #fcfcfd;
+  }
+  .card h4 {
+    margin: 0 0 1.5mm; font-size: 9.6pt; color: var(--ink); font-weight: 620;
+  }
+  .card p { margin: 0; font-size: 9pt; color: var(--body); }
+  .card .big {
+    font-size: 15pt; font-weight: 650; color: var(--accent); display: block;
+    margin-bottom: .5mm; font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- steps ---------- */
+  .step { margin-bottom: 6mm; page-break-inside: avoid; }
+  .step > h3 { display: flex; align-items: baseline; gap: 3mm; margin-top: 0; }
+  .step .n {
+    background: var(--accent); color: #fff; width: 6.5mm; height: 6.5mm;
+    border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    font-size: 8.6pt; font-weight: 650; flex: none;
+  }
+
+  .foot {
+    margin-top: 8mm; padding-top: 3mm; border-top: 1px solid var(--rule);
+    font-size: 8.2pt; color: var(--muted); display: flex; justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<section class="page cover">
+  <div class="eyebrow">System Architecture</div>
+  <div class="rule"></div>
+  <h1>Multi-Camera Streaming<br>over NVR and Raspberry&nbsp;Pi</h1>
+  <p class="sub">
+    How office CCTV cameras reach any browser, anywhere — and how the same live
+    feed is reused by other systems without ever overloading the recorder.
+  </p>
+  <dl>
+    <dt>Video source</dt><dd>Network Video Recorder (multi-channel RTSP)</dd>
+    <dt>Streaming host</dt><dd>Raspberry Pi 5 · 2 GB · 64-bit</dd>
+    <dt>Transport</dt><dd>MediaMTX · WebRTC · Cloudflare Tunnel</dd>
+    <dt>Public access</dt><dd>HTTPS, password-gated, no port forwarding</dd>
+  </dl>
+</section>
+
+<!-- ============ 1. OVERVIEW ============ -->
+<section class="page">
+  <h2><span class="secnum">01</span>The problem</h2>
+  <p class="h2sub">Why CCTV is not simply viewable from the internet</p>
+
+  <p>
+    An IP camera speaks <strong>RTSP</strong>, a protocol no web browser can play.
+    It also lives on a private LAN address such as <code>192.168.1.x</code>, which
+    nothing outside the office can reach. Two separate problems, and both must be
+    solved before anyone can watch a camera from a phone.
+  </p>
+
+  <div class="cards">
+    <div class="card">
+      <h4>Browsers cannot play RTSP</h4>
+      <p>The stream must be repackaged into something a browser understands —
+      here, WebRTC — without re-recording it.</p>
+    </div>
+    <div class="card">
+      <h4>The camera is behind NAT</h4>
+      <p>No cloud service can dial into <code>192.168.1.x</code>. Something on the
+      LAN has to originate the connection outward.</p>
+    </div>
+  </div>
+
+  <p>
+    The conventional fix is port forwarding: open a hole in the office firewall
+    and point it at the recorder. That exposes the NVR's login page to the whole
+    internet, and CCTV recorders are a well-known target. This design avoids it
+    entirely.
+  </p>
+
+  <h3>A third problem: the connection limit</h3>
+  <p>
+    An NVR tolerates only a handful of simultaneous RTSP clients — typically
+    <strong>four to eight in total</strong>, regardless of how many cameras it
+    records. Point a viewer, a phone, and an analytics tool at it directly and
+    the recorder starts refusing connections. Any design that lets consumers
+    talk to the NVR directly will not scale.
+  </p>
+
+  <div class="box">
+    <span class="lbl">The requirement</span>
+    <p>Reach every camera from anywhere, over HTTPS, with no inbound firewall
+    rule — while holding <strong>exactly one</strong> connection per channel to
+    the recorder no matter how many people or systems are watching.</p>
+  </div>
+</section>
+
+<!-- ============ 2. ARCHITECTURE ============ -->
+<section class="page">
+  <h2><span class="secnum">02</span>The architecture</h2>
+  <p class="h2sub">One inbound connection per camera, unlimited outbound consumers</p>
+
+  <figure>
+    <svg viewBox="0 0 700 400" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">
+      <defs>
+        <marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="3"
+                orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L7,3 z" fill="#6b7684"/>
+        </marker>
+        <style>
+          .bx  { fill:#fff; stroke:#98a2b0; stroke-width:1.2; rx:3; }
+          .pi  { fill:#eef4fd; stroke:#1e5fbf; stroke-width:1.5; rx:3; }
+          .nvr { fill:#f5f6f8; stroke:#6b7684; stroke-width:1.4; rx:3; }
+          .zn  { fill:none; stroke:#c6ccd4; stroke-width:1; stroke-dasharray:4 3; rx:5; }
+          .ln  { stroke:#6b7684; stroke-width:1.2; fill:none; marker-end:url(#ar); }
+          .t   { font-family:"Segoe UI",Arial,sans-serif; font-size:11px; fill:#12161c; }
+          .ts  { font-family:"Segoe UI",Arial,sans-serif; font-size:9.5px; fill:#6b7684; }
+          .tz  { font-family:"Segoe UI",Arial,sans-serif; font-size:9px; fill:#8b95a3;
+                 letter-spacing:.1em; }
+          .tb  { font-family:"Segoe UI",Arial,sans-serif; font-size:11px; fill:#1e5fbf;
+                 font-weight:600; }
+        </style>
+      </defs>
+
+      <!-- zones -->
+      <rect class="zn" x="8"   y="26" width="416" height="360"/>
+      <rect class="zn" x="446" y="26" width="246" height="360"/>
+      <text class="tz" x="20"  y="20">OFFICE LAN · 192.168.1.0/24</text>
+      <text class="tz" x="458" y="20">INTERNET</text>
+
+      <!-- cameras -->
+      <rect class="bx" x="26" y="48"  width="86" height="26"/>
+      <rect class="bx" x="26" y="82"  width="86" height="26"/>
+      <rect class="bx" x="26" y="116" width="86" height="26"/>
+      <rect class="bx" x="26" y="150" width="86" height="26"/>
+      <text class="t" x="69" y="65"  text-anchor="middle">Camera 1</text>
+      <text class="t" x="69" y="99"  text-anchor="middle">Camera 2</text>
+      <text class="t" x="69" y="133" text-anchor="middle">Camera 3</text>
+      <text class="t" x="69" y="167" text-anchor="middle">Camera N</text>
+
+      <!-- cameras -> NVR : bus then single arrow -->
+      <path d="M112,61  H150" stroke="#98a2b0" stroke-width="1.2" fill="none"/>
+      <path d="M112,95  H150" stroke="#98a2b0" stroke-width="1.2" fill="none"/>
+      <path d="M112,129 H150" stroke="#98a2b0" stroke-width="1.2" fill="none"/>
+      <path d="M112,163 H150" stroke="#98a2b0" stroke-width="1.2" fill="none"/>
+      <path d="M150,61 V163" stroke="#98a2b0" stroke-width="1.2" fill="none"/>
+      <path class="ln" d="M150,112 H196"/>
+
+      <!-- NVR -->
+      <rect class="nvr" x="198" y="94" width="74" height="36"/>
+      <text class="t" x="235" y="116" text-anchor="middle">NVR</text>
+
+      <!-- NVR -> Pi -->
+      <path class="ln" d="M235,130 V196"/>
+      <text class="ts" x="244" y="152">RTSP</text>
+      <text class="ts" x="244" y="164">1 per channel</text>
+
+      <!-- Pi -->
+      <rect class="pi" x="132" y="198" width="206" height="84"/>
+      <text class="tb" x="235" y="220" text-anchor="middle">Raspberry Pi 5</text>
+      <text class="ts" x="235" y="240" text-anchor="middle">MediaMTX · fan-out</text>
+      <text class="ts" x="235" y="254" text-anchor="middle">Node server · password gate</text>
+      <text class="ts" x="235" y="268" text-anchor="middle">cloudflared · outbound tunnel</text>
+
+      <!-- Pi -> other systems -->
+      <path class="ln" d="M180,282 V326"/>
+      <text class="ts" x="188" y="306">HTTP / RTSP</text>
+      <rect class="bx" x="80" y="328" width="200" height="40"/>
+      <text class="t"  x="180" y="345" text-anchor="middle">Other systems</text>
+      <text class="ts" x="180" y="359" text-anchor="middle">analytics, recording, integrations</text>
+
+      <!-- tunnel across the boundary -->
+      <path class="ln" d="M338,232 H500"/>
+      <text class="ts" x="352" y="225">Tunnel (outbound)</text>
+
+      <!-- viewers -->
+      <rect class="bx" x="502" y="120" width="160" height="34"/>
+      <rect class="bx" x="502" y="214" width="160" height="34"/>
+      <rect class="bx" x="502" y="308" width="160" height="34"/>
+      <text class="t" x="582" y="141" text-anchor="middle">Browser · laptop</text>
+      <text class="t" x="582" y="235" text-anchor="middle">Phone · cellular</text>
+      <text class="t" x="582" y="329" text-anchor="middle">Client · offsite</text>
+
+      <path d="M500,232 V137 H500" stroke="#6b7684" stroke-width="1.2" fill="none"
+            marker-end="url(#ar)"/>
+      <path d="M500,232 V325 H500" stroke="#6b7684" stroke-width="1.2" fill="none"
+            marker-end="url(#ar)"/>
+
+      <text class="ts" x="458" y="372">No inbound ports opened</text>
+    </svg>
+    <figcaption>The Pi is the only device that talks to the NVR. Everything else talks to the Pi.</figcaption>
+  </figure>
+
+  <h3>Why the Pi sits in the middle</h3>
+  <p>
+    It is the <strong>fan-out point</strong>. The Pi opens one RTSP connection per
+    camera channel and holds it. Every viewer, phone, and downstream system
+    connects to the Pi instead of the recorder. The NVR's connection limit is
+    therefore never a factor: from its point of view there is a single client,
+    permanently attached, no matter how many people are watching.
+  </p>
+  <p>
+    It also originates the tunnel. <code>cloudflared</code> dials <em>out</em> to
+    Cloudflare and keeps that connection open; public traffic arrives back down
+    the same pipe. No inbound firewall rule, no port forward, no static IP from
+    the ISP, and nothing on the office network is exposed to the internet.
+  </p>
+
+  <div class="box ok">
+    <span class="lbl">Security consequence</span>
+    <p>The NVR is never reachable from outside. Only the Pi is, only over HTTPS,
+    and only behind a password. Compromising the public URL yields a video feed —
+    not administrative access to the recorder.</p>
+  </div>
+</section>
+
+<!-- ============ 3. PIPELINE ============ -->
+<section class="page">
+  <h2><span class="secnum">03</span>How a frame travels</h2>
+  <p class="h2sub">From camera lens to browser window</p>
+
+  <figure>
+    <svg viewBox="0 0 700 120" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">
+      <defs>
+        <marker id="ar2" markerWidth="8" markerHeight="8" refX="7" refY="3"
+                orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L7,3 z" fill="#6b7684"/>
+        </marker>
+        <style>
+          .s  { fill:#fff; stroke:#98a2b0; stroke-width:1.2; rx:3; }
+          .sk { fill:#eef4fd; stroke:#1e5fbf; stroke-width:1.4; rx:3; }
+          .a  { stroke:#6b7684; stroke-width:1.2; fill:none; marker-end:url(#ar2); }
+          .l  { font-family:"Segoe UI",Arial,sans-serif; font-size:10px; fill:#12161c;
+                text-anchor:middle; }
+          .n  { font-family:"Segoe UI",Arial,sans-serif; font-size:8.5px; fill:#6b7684;
+                text-anchor:middle; }
+        </style>
+      </defs>
+
+      <rect class="s"  x="6"   y="30" width="88" height="32"/>
+      <rect class="s"  x="120" y="30" width="72" height="32"/>
+      <rect class="sk" x="218" y="30" width="98" height="32"/>
+      <rect class="sk" x="342" y="30" width="106" height="32"/>
+      <rect class="s"  x="474" y="30" width="98" height="32"/>
+      <rect class="s"  x="598" y="30" width="96" height="32"/>
+
+      <text class="l" x="50"  y="50">Camera</text>
+      <text class="l" x="156" y="50">NVR</text>
+      <text class="l" x="267" y="50">MediaMTX</text>
+      <text class="l" x="395" y="50">Node server</text>
+      <text class="l" x="523" y="50">Cloudflare</text>
+      <text class="l" x="646" y="50">Browser</text>
+
+      <path class="a" d="M94,46  H116"/>
+      <path class="a" d="M192,46 H214"/>
+      <path class="a" d="M316,46 H338"/>
+      <path class="a" d="M448,46 H470"/>
+      <path class="a" d="M572,46 H594"/>
+
+      <text class="n" x="267" y="80">buffers</text>
+      <text class="n" x="267" y="92">&amp; fans out</text>
+      <text class="n" x="395" y="80">password</text>
+      <text class="n" x="395" y="92">gate</text>
+      <text class="n" x="646" y="80">plays natively</text>
+    </svg>
+  </figure>
+
+  <table>
+    <thead>
+      <tr><th style="width:34mm">Stage</th><th>What happens</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Camera</strong></td><td>Encodes H.264 or H.265 and publishes over RTSP to the recorder.</td></tr>
+      <tr><td><strong>NVR</strong></td><td>Records to disk and re-serves each camera as an RTSP channel on one IP address.</td></tr>
+      <tr><td><strong>MediaMTX</strong></td><td>Pulls each channel once, holds it, and re-publishes it simultaneously as WebRTC, RTSP and HTTP. This is the fan-out.</td></tr>
+      <tr><td><strong>Node server</strong></td><td>Enforces the password, serves the viewer page, and proxies WebRTC. MediaMTX is bound to localhost so the gate cannot be bypassed.</td></tr>
+      <tr><td><strong>Cloudflare</strong></td><td>Terminates HTTPS and relays traffic down the tunnel the Pi opened outbound.</td></tr>
+      <tr><td><strong>Browser</strong></td><td>Plays WebRTC natively — no plugin, no app, sub-second latency.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Why WebRTC rather than HLS</h3>
+  <p>
+    HLS — the format used by streaming platforms — chops video into files a few
+    seconds long. That buffering puts the picture <strong>6 to 10 seconds behind
+    real time</strong>. Acceptable for television, poor for security, where the
+    operator needs to see what is happening now.
+  </p>
+
+  <table>
+    <thead><tr><th>Approach</th><th class="num">Latency</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>HLS</td><td class="num">6–10 s</td><td>Too far behind for live monitoring</td></tr>
+      <tr><td><strong>WebRTC</strong></td><td class="num">&lt; 1 s</td><td><strong>Used here</strong> — effectively real time</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Passthrough versus transcoding</h3>
+  <p>
+    Where a camera already emits browser-compatible H.264, its packets are copied
+    through untouched — negligible CPU, and many cameras run comfortably at once.
+    Some cameras instead emit full-range <code>yuvj420p</code>, which browsers
+    silently refuse to decode: the connection succeeds, data flows, and the viewer
+    sees a grey rectangle. Those channels must be re-encoded.
+  </p>
+
+  <div class="box warn">
+    <span class="lbl">Design constraint</span>
+    <p>The Raspberry Pi 5 has hardware video <em>decode</em> but <strong>no
+    hardware encoder</strong>. Transcoding therefore runs in software and is
+    expensive — roughly two to three channels before the CPU saturates.
+    Passthrough is the intended mode; transcoding is the exception, enabled per
+    camera only where a channel demands it.</p>
+  </div>
+</section>
+
+<!-- ============ 4. REUSE ============ -->
+<section class="page">
+  <h2><span class="secnum">04</span>One feed, many systems</h2>
+  <p class="h2sub">The same live stream, offered in whichever protocol a consumer needs</p>
+
+  <p>
+    Because MediaMTX re-publishes each camera in several formats at once, a single
+    inbound stream serves consumers with quite different requirements — a browser,
+    an analytics process, a recording tool — with no additional load on the NVR.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th style="width:44mm">Endpoint</th><th>Best suited to</th><th class="num">Latency</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>/?cam=NAME</code></td><td>Human viewers in a browser (WebRTC)</td><td class="num">&lt; 1 s</td></tr>
+      <tr><td><code>/NAME.mp4</code></td><td>Any system that accepts an HTTP video URL</td><td class="num">1–3 s</td></tr>
+      <tr><td><code>rtsp://PI:8554/NAME</code></td><td>LAN tools — OpenCV, FFmpeg, recorders</td><td class="num">&lt; 1 s</td></tr>
+    </tbody>
+  </table>
+
+  <figure>
+    <svg viewBox="0 0 700 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">
+      <defs>
+        <marker id="ar3" markerWidth="8" markerHeight="8" refX="7" refY="3"
+                orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L7,3 z" fill="#6b7684"/>
+        </marker>
+        <style>
+          .f  { fill:#fff; stroke:#98a2b0; stroke-width:1.2; rx:3; }
+          .fp { fill:#eef4fd; stroke:#1e5fbf; stroke-width:1.5; rx:3; }
+          .fa { stroke:#6b7684; stroke-width:1.2; fill:none; marker-end:url(#ar3); }
+          .fl { font-family:"Segoe UI",Arial,sans-serif; font-size:10.5px; fill:#12161c; }
+          .fn { font-family:"Segoe UI",Arial,sans-serif; font-size:9px; fill:#6b7684; }
+          .fc { font-family:"Segoe UI",Arial,sans-serif; font-size:9.5px; fill:#1e5fbf;
+                font-weight:600; letter-spacing:.06em; }
+        </style>
+      </defs>
+
+      <!-- NVR -->
+      <rect class="f" x="8" y="72" width="86" height="38"/>
+      <text class="fl" x="51" y="96" text-anchor="middle">NVR</text>
+
+      <!-- NVR -> Pi -->
+      <path class="fa" d="M94,91 H176"/>
+      <text class="fn" x="103" y="84">1 RTSP</text>
+      <text class="fn" x="103" y="106">per channel</text>
+
+      <!-- Pi -->
+      <rect class="fp" x="178" y="66" width="104" height="50"/>
+      <text class="fl" x="230" y="88" text-anchor="middle" fill="#1e5fbf"
+            font-weight="600">Pi 5</text>
+      <text class="fn" x="230" y="104" text-anchor="middle">MediaMTX</text>
+
+      <!-- fan-out bus -->
+      <path d="M282,91 H330" stroke="#6b7684" stroke-width="1.2" fill="none"/>
+      <path d="M330,34 V148" stroke="#6b7684" stroke-width="1.2" fill="none"/>
+      <path class="fa" d="M330,34  H418"/>
+      <path class="fa" d="M330,91  H418"/>
+      <path class="fa" d="M330,148 H418"/>
+
+      <!-- consumers -->
+      <rect class="f" x="420" y="17"  width="180" height="34"/>
+      <rect class="f" x="420" y="74"  width="180" height="34"/>
+      <rect class="f" x="420" y="131" width="180" height="34"/>
+      <text class="fl" x="434" y="38">Browser</text>
+      <text class="fl" x="434" y="95">Other system</text>
+      <text class="fl" x="434" y="152">Analytics</text>
+      <text class="fn" x="612" y="38">WebRTC</text>
+      <text class="fn" x="612" y="95">HTTP .mp4</text>
+      <text class="fn" x="612" y="152">RTSP · LAN</text>
+
+      <text class="fc" x="8"   y="190">ONE connection in</text>
+      <text class="fc" x="420" y="190">MANY consumers out</text>
+    </svg>
+    <figcaption>The recorder's connection limit constrains the left side only.</figcaption>
+  </figure>
+
+  <h3>Two honest caveats</h3>
+  <p>
+    <strong>The MP4 endpoint is a live pipe, not a file.</strong> It streams
+    indefinitely from the current moment. Consumers expecting to seek, scrub, or
+    read a duration will not find those — it has no end. For live viewing and for
+    feeding a detector it is exactly right.
+  </p>
+  <p>
+    <strong>Each MP4 consumer costs a process.</strong> Every connection to
+    <code>/NAME.mp4</code> spawns its own FFmpeg on the Pi to repackage the stream.
+    The NVR is still protected — the fan-out is real — but the endpoint is not free
+    on the Pi itself. A handful of consumers is fine; dozens is not. Browser
+    viewers on WebRTC do not carry this cost and are the cheaper path where a
+    person, rather than a machine, is watching.
+  </p>
+
+  <div class="box">
+    <span class="lbl">Access control</span>
+    <p>Machines cannot complete a browser password prompt, so the MP4 endpoints
+    authenticate with a shared key appended to the URL. If that key is not
+    configured the endpoints are <strong>disabled outright</strong> rather than
+    left open — a camera feed should never become public because a setting was
+    forgotten.</p>
+  </div>
+</section>
+
+<!-- ============ 5. CAMERA REGISTRY ============ -->
+<section class="page">
+  <h2><span class="secnum">05</span>Adding cameras</h2>
+  <p class="h2sub">One registry entry per NVR channel</p>
+
+  <p>
+    Cameras are not hardcoded. Each is a record in a small database holding its
+    name, display label, RTSP URL, and whether it needs transcoding. The streaming
+    server reads this registry at startup and configures itself accordingly.
+  </p>
+
+  <p>
+    An NVR changes almost nothing about this. Rather than a different IP per
+    camera, every channel shares the recorder's address and differs only in the
+    path:
+  </p>
+
+<pre><span class="c"># Direct to camera — a different IP per device</span>
+rtsp://user:pass@<strong>192.168.1.50</strong>:554/stream
+
+<span class="c"># Via NVR — one IP, the channel number varies</span>
+rtsp://user:pass@<strong>192.168.1.10</strong>:554/...channel=<strong>1</strong>
+rtsp://user:pass@<strong>192.168.1.10</strong>:554/...channel=<strong>2</strong></pre>
+
+  <h3>RTSP paths differ by manufacturer</h3>
+  <p>
+    There is no universal RTSP path. Each vendor uses its own scheme, and
+    identifying the right one is the single most common point of failure during
+    installation.
+  </p>
+
+  <table>
+    <thead><tr><th style="width:32mm">Manufacturer</th><th>Path for channel <em>N</em></th></tr></thead>
+    <tbody>
+      <tr><td>Hikvision</td><td><code>/Streaming/Channels/N01</code> — ch1 = <code>101</code>, ch2 = <code>201</code></td></tr>
+      <tr><td>Dahua</td><td><code>/cam/realmonitor?channel=N&amp;subtype=0</code></td></tr>
+      <tr><td>Uniview</td><td><code>/unicast/cN/s0/live</code></td></tr>
+      <tr><td>Reolink</td><td><code>/h264Preview_0N_main</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="box">
+    <span class="lbl">Substreams</span>
+    <p>Most recorders publish a second, lower-resolution copy of every channel —
+    <code>subtype=1</code> on Dahua, <code>N02</code> on Hikvision. Typically
+    640×480 at a fraction of the bitrate. Worth using for any camera that is only
+    being monitored rather than inspected in detail; it cuts bandwidth
+    substantially at no real cost.</p>
+  </div>
+</section>
+
+<!-- ============ 6. DEPLOYMENT ============ -->
+<section class="page">
+  <h2><span class="secnum">06</span>Deployment sequence</h2>
+  <p class="h2sub">Six stages, in dependency order</p>
+
+  <div class="step">
+    <h3><span class="n">1</span> Prepare the Pi</h3>
+    <p>Install 64-bit Raspberry Pi OS Lite, plus FFmpeg and Node.js. Assign a
+    fixed LAN address so downstream systems have a stable target. The 64-bit
+    build matters — the streaming binary is published for <code>arm64</code>, and
+    a 32-bit installation will not find a matching release.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="n">2</span> Identify the NVR's RTSP scheme</h3>
+    <p>Locate the recorder on the network, confirm RTSP is enabled in its settings
+    — some ship with it switched off — and establish which path scheme it uses by
+    testing one channel. Do this before anything else: every later stage assumes a
+    working URL.</p>
+    <p>Create a <strong>dedicated read-only account</strong> on the NVR for the Pi
+    rather than reusing the administrator credentials.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="n">3</span> Install the streaming server</h3>
+    <p>Clone the application, install dependencies, and fetch the MediaMTX binary.
+    Configure the registry connection, the viewer password, and the stream key
+    that enables machine access.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="n">4</span> Register the channels</h3>
+    <p>Add one entry per camera, in passthrough mode unless a channel proves to
+    need re-encoding. Verify each is reachable before moving on.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="n">5</span> Establish the tunnel</h3>
+    <p>Start the streaming server and the tunnel. A named tunnel bound to your own
+    domain gives a permanent address; the default produces a new random URL on
+    every restart, which is unsuitable for anything but testing.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="n">6</span> Make it survive reboots</h3>
+    <p>Register both processes as system services so the Pi resumes streaming
+    automatically after a power cut — the deployment is unattended, and a site
+    visit to restart it defeats the purpose.</p>
+  </div>
+
+  <div class="box warn">
+    <span class="lbl">Known issue before Linux deployment</span>
+    <p>The streaming server currently resolves the MediaMTX binary by its Windows
+    filename. On Linux that file has no extension, so startup fails with a
+    <em>“not found”</em> error even after installation succeeds. A one-line change
+    to select the filename per platform is required before the Pi will run.</p>
+  </div>
+</section>
+
+<!-- ============ 7. CAPACITY ============ -->
+<section class="page">
+  <h2><span class="secnum">07</span>Capacity and limits</h2>
+  <p class="h2sub">What the hardware supports, and what constrains it</p>
+
+  <div class="cards">
+    <div class="card">
+      <h4>Passthrough channels</h4>
+      <p><span class="big">8–16</span>Limited by network bandwidth, not CPU. Packets are copied, not processed.</p>
+    </div>
+    <div class="card">
+      <h4>Transcoded channels</h4>
+      <p><span class="big">2–3</span>Software encoding only — the Pi 5 has no hardware encoder. Avoid where possible.</p>
+    </div>
+  </div>
+
+  <h3>Bandwidth is the real ceiling</h3>
+  <p>
+    In passthrough the Pi computes very little; it moves data. Budget roughly
+    <strong>4 Mbit/s per 1080p stream</strong>, and note that each concurrent
+    viewer consumes another copy — six cameras watched by five people is around
+    120 Mbit/s. The Pi 5's gigabit interface absorbs that comfortably.
+  </p>
+
+  <div class="box">
+    <span class="lbl">Why the hardware generation matters</span>
+    <p>The Raspberry Pi 3B+ shares its 100 Mbit network interface with the USB
+    bus, capping realistic throughput near 8–10 concurrent 1080p streams before
+    the interface saturates. The Pi 5 provides true dedicated gigabit — roughly a
+    tenfold increase in headroom, and the reason this design is viable on it.</p>
+  </div>
+
+  <h3>Deliberate exclusion: on-device video analytics</h3>
+  <p>
+    Object detection and face recognition are <strong>out of scope for this
+    deployment</strong>. The supporting libraries require several gigabytes of
+    memory to load, which a 2 GB Pi cannot provide, and inference on its CPU would
+    run at a small fraction of real time.
+  </p>
+  <p>
+    The architecture accommodates it regardless: analytics runs on a separate,
+    more capable machine and consumes the Pi's existing RTSP or MP4 endpoint like
+    any other client. Nothing about the streaming layer changes when it is added,
+    and the NVR sees no additional load.
+  </p>
+</section>
+
+<!-- ============ 8. SUMMARY ============ -->
+<section class="page">
+  <h2><span class="secnum">08</span>Summary</h2>
+  <p class="h2sub">The design in eight points</p>
+
+  <table>
+    <thead><tr><th style="width:44mm">Property</th><th>Outcome</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Access</strong></td><td>Any browser, anywhere, over HTTPS. No app, no plugin, no VPN client.</td></tr>
+      <tr><td><strong>Latency</strong></td><td>Under one second via WebRTC — effectively live.</td></tr>
+      <tr><td><strong>Firewall</strong></td><td>No inbound rules. The tunnel is opened outbound by the Pi.</td></tr>
+      <tr><td><strong>NVR load</strong></td><td>One connection per channel, constant, regardless of viewer count.</td></tr>
+      <tr><td><strong>Reuse</strong></td><td>The same feed is offered as WebRTC, HTTP and RTSP concurrently.</td></tr>
+      <tr><td><strong>Security</strong></td><td>Password-gated; the recorder is never exposed to the internet.</td></tr>
+      <tr><td><strong>Running cost</strong></td><td>Tunnel bandwidth is unmetered; the Pi draws a few watts.</td></tr>
+      <tr><td><strong>Scaling</strong></td><td>Add a camera by adding a registry entry — no code changes.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Prerequisites before installation</h3>
+  <ul>
+    <li>NVR manufacturer and model, and the number of channels to publish.</li>
+    <li>A dedicated read-only NVR account for the Pi.</li>
+    <li>RTSP confirmed enabled on the recorder.</li>
+    <li>A fixed LAN address for the Pi.</li>
+    <li>A domain on Cloudflare, if a permanent public URL is required.</li>
+  </ul>
+
+  <h3>Outstanding engineering items</h3>
+  <ul>
+    <li><strong>Platform fix</strong> — resolve the MediaMTX binary name per operating system, so the server starts on Linux.</li>
+    <li><strong>Per-channel verification</strong> — probe each NVR channel to determine whether it can pass through untouched or requires re-encoding.</li>
+    <li><strong>Service definitions</strong> — register the server and tunnel as system services for unattended restart.</li>
+  </ul>
+
+  <div class="foot">
+    <span>Multi-Camera Streaming Architecture</span>
+    <span>Page 8 of 8</span>
+  </div>
+</section>
+
+</body>
+</html>

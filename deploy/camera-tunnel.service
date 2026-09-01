@@ -1,0 +1,35 @@
+[Unit]
+Description=Cloudflare Tunnel for the camera server (public HTTPS URL)
+Documentation=https://github.com/sairosthedev/streaming
+After=network-online.target camera.service
+Wants=network-online.target
+# The tunnel is useless without the server, but it should not take the server
+# down with it: BindsTo would do that. Wants is the looser, correct relation.
+Wants=camera.service
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/streaming/pc
+ExecStart=/usr/bin/node src/tunnel.js
+
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=0
+
+KillMode=control-group
+TimeoutStopSec=20
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=camera-tunnel
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+# cloudflared only reads its credentials from ~/.cloudflared, so read-only home
+# is enough; its writable state lives in PrivateTmp.
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

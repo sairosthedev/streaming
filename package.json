@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "pdf": "node scripts/make-pdf.js",
 
     "setup": "npm --prefix pc install && npm --prefix pc run setup",
     "camera": "npm --prefix pc start",
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.7",
+    "puppeteer": "^25.3.0",
     "typescript": "^5.7.3"
   }
 }

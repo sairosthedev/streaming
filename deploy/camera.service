@@ -1,0 +1,43 @@
+[Unit]
+Description=Camera streaming server (RTSP -> MediaMTX -> WebRTC)
+Documentation=https://github.com/sairosthedev/streaming
+# Cameras come from MongoDB Atlas, so DNS and a route out must exist first.
+# network-online.target (not network.target) waits for an actual address.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/streaming/pc
+ExecStart=/usr/bin/node src/webrtc.js
+
+# The camera is transient by nature: switch reboots, PoE blips, RTSP timeouts.
+# Always restart, and never give up -- StartLimitBurst defaults would stop the
+# unit permanently after a handful of quick failures, which for an appliance
+# that must survive a power cut is the wrong answer.
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+# The server spawns ffmpeg and mediamtx as children. KillMode=control-group
+# (the default) ensures they die with it -- otherwise a restart leaves orphaned
+# ffmpegs holding the RTSP port and the new instance cannot bind.
+KillMode=control-group
+TimeoutStopSec=20
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=camera
+
+# Hardening. The server needs to read its own directory, write nothing outside
+# it, and reach the network. Everything else is denied.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+# ...but it must write pc/bin/mediamtx.generated.yml on every start.
+ReadWritePaths=/home/%i/streaming/pc
+
+[Install]
+WantedBy=multi-user.target

@@ -57,6 +57,18 @@ export function which(name) {
 
 /** Human-readable install hint for a missing binary. */
 export function installHint(name) {
+  if (os.platform() !== 'win32') {
+    // cloudflared is not in the Debian/Raspberry Pi OS repos; it comes from
+    // Cloudflare's own package repo, so apt alone is not enough advice.
+    if (name === 'cloudflared') {
+      return (
+        `${name} not found. Install it from Cloudflare's repo:\n` +
+        '    https://pkg.cloudflare.com  (see "Install cloudflared")'
+      );
+    }
+    return `${name} not found. Install it with:\n    sudo apt install -y ffmpeg`;
+  }
+
   const pkg = name === 'cloudflared' ? 'Cloudflare.cloudflared' : 'Gyan.FFmpeg';
   return `${name} not found. Install it with:\n    winget install ${pkg}\n  then open a NEW terminal.`;
 }

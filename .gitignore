@@ -21,3 +21,6 @@ guard/events/
 guard/known_faces/*.jpg
 guard/known_faces/*.jpeg
 guard/known_faces/*.png
+
+# Camera URLs doc: contains the stream key and view password in plaintext.
+docs/camera-urls.md

@@ -12,7 +12,8 @@
     "hls": "node src/server.js",
     "agent": "node agent/index.js",
     "tunnel": "node src/tunnel.js",
-    "probe": "node src/probe.js"
+    "probe": "node src/probe.js",
+    "loadtest": "node src/loadtest.js"
   },
   "engines": {
     "node": ">=18"
