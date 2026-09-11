@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { which, installHint } from './which.js';
 import { dbConfigured, getCameras } from './db.js';
+import { rediscover } from './discover.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -528,6 +529,14 @@ app.use(express.static(path.join(ROOT, 'public-webrtc')));
 
 cameras = await loadCameras();
 
+// Cameras that carry a MAC get their IP re-resolved now: the address DHCP gave
+// them at the last site is meaningless at this one.
+{
+  const { changed, missing } = await rediscover(cameras);
+  for (const c of changed) console.log(`  [discover] ${c.name}: ${c.from} -> ${c.to}`);
+  for (const n of missing) console.error(`  [discover] ${n}: MAC not found on this network`);
+}
+
 console.log(`\n  Cameras (${cameras.length}):`);
 for (const cam of cameras) {
   console.log(`    ${cam.name.padEnd(14)} ${cam.transcode ? 'transcode' : 'passthrough'}  ${maskUrl(cam.rtspUrl)}`);
@@ -538,8 +547,33 @@ console.log(`  Local:    http://localhost:${PORT}`);
 console.log(`  Password: ${VIEW_PASSWORD ? 'on' : 'OFF - anyone with the URL can watch'}`);
 console.log(`\n  For the public URL, in a second terminal:  npm run tunnel\n`);
 
+const REDISCOVER_MS = Number(process.env.REDISCOVER_SECONDS || 300) * 1000;
+
+/**
+ * Cameras move when a DHCP lease changes or the box is replugged elsewhere.
+ * Re-resolving on a timer means the stream heals itself instead of needing a
+ * human to notice and restart it.
+ */
+function armRediscovery() {
+  if (!(REDISCOVER_MS > 0)) return;
+  setInterval(async () => {
+    if (shuttingDown) return;
+    try {
+      const { changed } = await rediscover(cameras);
+      if (!changed.length) return;
+      for (const c of changed) console.log(`  [discover] ${c.name} moved ${c.from} -> ${c.to}`);
+      // writeConfig() runs inside startMediaMtx, and the close handler restarts
+      // it: killing is enough to pick the new addresses up.
+      mtx?.kill();
+    } catch (err) {
+      console.error('  [discover]', err.message);
+    }
+  }, REDISCOVER_MS).unref();
+}
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   startMediaMtx();
+  armRediscovery();
   for (const cam of cameras) {
     if (cam.transcode) armTranscode(cam);
   }

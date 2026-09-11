@@ -5,6 +5,7 @@
  *   npm run cameras -- add <name> "<label>" <rtspUrl> [--udp] [--passthrough]
  *   npm run cameras -- set-url <name> <rtspUrl>
  *   npm run cameras -- set-mode <name> transcode|passthrough
+ *   npm run cameras -- set-mac <name> <mac|none>
  *   npm run cameras -- rename <old-name> <new-name>
  *   npm run cameras -- disable <name>
  *   npm run cameras -- enable <name>
@@ -18,7 +19,8 @@
  * for cameras like Dahuas that emit full-range yuvj420p, which browsers render
  * as a grey screen without re-encoding.
  */
-import { dbConfigured, getCameras, addCamera, updateCameraUrl, renameCamera, listAll, setEnabled, setTranscode, removeCamera, closeDb } from './db.js';
+import { normalizeMac } from './discover.js';
+import { dbConfigured, getCameras, addCamera, updateCameraUrl, renameCamera, listAll, setEnabled, setTranscode, setMac, removeCamera, closeDb } from './db.js';
 
 if (!dbConfigured()) {
   console.error('\n  MONGODB_URI is not set in .env - the camera registry needs it.\n');
@@ -26,6 +28,14 @@ if (!dbConfigured()) {
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
+
+const USAGE_SET_MAC =
+  '\n  usage: npm run cameras -- set-mac <name> <mac|none>' +
+  '\n         e.g. npm run cameras -- set-mac video1 f8:ce:07:3d:57:39\n';
+const MSG_MAC_SET = (n, m) =>
+  `\n  "${n}" -> mac ${m}. The IP is now re-resolved on every start.\n`;
+const MSG_MAC_CLEARED = (n) =>
+  `\n  "${n}" -> mac cleared. It will use its fixed URL again.\n`;
 
 function maskUrl(u) {
   return String(u).replace(/\/\/[^@/]*@/, '//***:***@');
@@ -116,6 +126,27 @@ try {
       break;
     }
 
+    case 'set-mac': {
+      const [name, mac] = rest;
+      if (!name || !mac) {
+        console.error(USAGE_SET_MAC);
+        process.exit(1);
+      }
+      if (mac === 'none') {
+        await setMac(name, null);
+        console.log(MSG_MAC_CLEARED(name));
+        break;
+      }
+      const norm = normalizeMac(mac);
+      if (!norm) {
+        console.error(USAGE_SET_MAC);
+        process.exit(1);
+      }
+      await setMac(name, norm);
+      console.log(MSG_MAC_SET(name, norm));
+      break;
+    }
+
     case 'remove': {
       const [name] = rest;
       if (!name) { console.error('\n  usage: npm run cameras -- remove <name>\n'); process.exit(1); }
@@ -130,6 +161,7 @@ try {
       console.log('    npm run cameras -- add <name> "<label>" <rtspUrl> [--udp] [--passthrough]');
       console.log('    npm run cameras -- set-url <name> <rtspUrl>');
       console.log('    npm run cameras -- set-mode <name> transcode|passthrough');
+      console.log('    npm run cameras -- set-mac <name> <mac|none>');
       console.log('    npm run cameras -- rename <old-name> <new-name>');
       console.log('    npm run cameras -- disable <name>');
       console.log('    npm run cameras -- enable <name>');

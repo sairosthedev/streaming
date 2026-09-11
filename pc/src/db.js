@@ -10,6 +10,7 @@
  *     rtspUrl:   'rtsp://user:pass@...', // same URL you would paste into VLC
  *     transport: 'tcp',                  // or 'udp'
  *     transcode: true,                   // false = pass H264 through untouched
+ *     mac:       'f8:ce:07:3d:57:39',    // optional: re-resolve the IP by MAC
  *     enabled:   true,
  *     createdAt: Date
  *   }
@@ -55,10 +56,11 @@ export async function getCameras() {
       rtspUrl: d.rtspUrl,
       transport: d.transport === 'udp' ? 'udp' : 'tcp',
       transcode: d.transcode !== false,
+      mac: d.mac ?? null,
     }));
 }
 
-export async function addCamera({ name, label, rtspUrl, transport = 'tcp', transcode = true }) {
+export async function addCamera({ name, label, rtspUrl, transport = 'tcp', transcode = true, mac = null }) {
   if (!NAME_RE.test(name)) {
     throw new Error(`name must match ${NAME_RE} (lowercase letters, digits, dashes)`);
   }
@@ -72,6 +74,7 @@ export async function addCamera({ name, label, rtspUrl, transport = 'tcp', trans
     rtspUrl,
     transport,
     transcode,
+    mac,
     enabled: true,
     createdAt: new Date(),
   });
@@ -104,6 +107,12 @@ export async function listAll() {
 export async function setEnabled(name, enabled) {
   const col = await collection();
   const r = await col.updateOne({ name }, { $set: { enabled } });
+  if (!r.matchedCount) throw new Error(`no camera named "${name}"`);
+}
+
+export async function setMac(name, mac) {
+  const col = await collection();
+  const r = await col.updateOne({ name }, { $set: { mac } });
   if (!r.matchedCount) throw new Error(`no camera named "${name}"`);
 }
 

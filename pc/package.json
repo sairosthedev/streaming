@@ -13,7 +13,8 @@
     "agent": "node agent/index.js",
     "tunnel": "node src/tunnel.js",
     "probe": "node src/probe.js",
-    "loadtest": "node src/loadtest.js"
+    "loadtest": "node src/loadtest.js",
+    "discover": "node src/discover.js"
   },
   "engines": {
     "node": ">=18"
