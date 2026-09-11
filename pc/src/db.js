@@ -19,8 +19,45 @@
  */
 import './env.js';
 import { MongoClient } from 'mongodb';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const URI = process.env.MONGODB_URI || '';
+
+/**
+ * Last known good camera list, on disk.
+ *
+ * The registry lives in Atlas, so a site with no internet cannot read it and
+ * the server would exit at boot having never streamed a frame. Every
+ * successful read writes this file; a failed connection falls back to it.
+ * Cameras are not secret from the machine already holding their passwords, but
+ * the file does contain them, so it stays out of git.
+ */
+const CACHE_FILE = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '.cache',
+  'cameras.json',
+);
+
+function writeCache(cams) {
+  try {
+    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cams, null, 2));
+  } catch (err) {
+    console.error(`  [cache] could not write: ${err.message}`);
+  }
+}
+
+function readCache() {
+  try {
+    const cams = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    return Array.isArray(cams) && cams.length ? cams : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Stream path names end up in URLs and MediaMTX config: keep them strict. */
 export const NAME_RE = /^[a-z0-9][a-z0-9-]{0,30}$/;
@@ -39,8 +76,28 @@ async function collection() {
   return client.db('titancctv').collection('cameras');
 }
 
-/** Enabled cameras, oldest first, validated. Throws if MONGODB_URI is unset. */
+/**
+ * Enabled cameras, oldest first, validated.
+ *
+ * Falls back to the on-disk cache when Atlas cannot be reached, so a site with
+ * no internet still streams. Throws only when there is neither.
+ */
 export async function getCameras() {
+  try {
+    const cams = await getCamerasFromDb();
+    writeCache(cams);
+    return cams;
+  } catch (err) {
+    const cached = readCache();
+    if (!cached) throw err;
+    const why = String(err.message).split(/\r?\n/)[0].slice(0, 60);
+    console.error(`  [cache] Atlas unreachable (${why})`);
+    console.error(`  [cache] using ${cached.length} camera(s) from the last successful read`);
+    return cached;
+  }
+}
+
+async function getCamerasFromDb() {
   const col = await collection();
   const docs = await col.find({ enabled: { $ne: false } }).sort({ createdAt: 1 }).toArray();
 

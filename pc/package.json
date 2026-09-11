@@ -14,7 +14,8 @@
     "tunnel": "node src/tunnel.js",
     "probe": "node src/probe.js",
     "loadtest": "node src/loadtest.js",
-    "discover": "node src/discover.js"
+    "discover": "node src/discover.js",
+    "scan": "node src/scan.js"
   },
   "engines": {
     "node": ">=18"

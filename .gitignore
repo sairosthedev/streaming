@@ -24,3 +24,6 @@ guard/known_faces/*.png
 
 # Camera URLs doc: contains the stream key and view password in plaintext.
 docs/camera-urls.md
+
+# Offline registry cache: last known good camera list, contains passwords.
+pc/.cache/
