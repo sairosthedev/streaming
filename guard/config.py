@@ -15,14 +15,14 @@ EVENTS_DIR = ROOT / "events"
 # ---------------------------------------------------------------------------
 # Video source
 #
-# Pull from MediaMTX's local RTSP rather than the camera directly: the camera
-# only tolerates a couple of connections, and the streaming server is already
-# holding one. This also means we read the transcoded, browser-safe stream.
-#
-# Falls back to the camera's own RTSP URL when the streaming server isn't up.
+# Prefer the same local camera feed that is proven to be working on this
+# machine. The Pi can be used as a fallback, but the local server is the most
+# reliable source for testing and development.
 # ---------------------------------------------------------------------------
 CAMERA_NAME = os.getenv("GUARD_CAMERA", "video1")
-STREAM_URL = os.getenv("GUARD_STREAM_URL", f"rtsp://127.0.0.1:8554/{CAMERA_NAME}")
+STREAM_KEY = os.getenv("STREAM_KEY", "wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4")
+DEFAULT_STREAM = f"http://localhost:8080/{CAMERA_NAME}.mp4?key={STREAM_KEY}"
+STREAM_URL = os.getenv("GUARD_STREAM_URL", DEFAULT_STREAM)
 
 # ---------------------------------------------------------------------------
 # Detection

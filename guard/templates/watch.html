@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smart Watch</title>
+  <style>
+    :root {
+      --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e8ec;
+      --dim:#8b93a3; --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; padding:24px; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+    h1 { margin:0 0 4px; font-size:20px; }
+    .sub { color:var(--dim); margin-bottom:18px; font-size:13px; }
+    .grid { display:grid; grid-template-columns: 2fr 1fr; gap:20px; }
+    @media (max-width: 900px) { .grid { grid-template-columns:1fr; } }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+    img.live { width:100%; border-radius:8px; display:block; background:#000; }
+    .status { display:flex; align-items:center; gap:10px; font-weight:600; font-size:20px; margin-bottom:14px; }
+    .dot { width:12px; height:12px; border-radius:50%; background:var(--dim); }
+    .dot.ok { background:var(--ok); }
+    .dot.warn { background:var(--warn); }
+    .dot.bad { background:var(--bad); animation:pulse 1s infinite; }
+    @keyframes pulse { 50%{ opacity:.3; } }
+    .metrics { display:grid; gap:8px; font-size:14px; }
+    .row { display:flex; justify-content:space-between; }
+    .row span:first-child { color:var(--dim); }
+    h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); margin:18px 0 10px; }
+    .event { border-left:3px solid var(--line); padding:8px 0 8px 12px; margin-bottom:10px; font-size:14px; }
+    .event.alert { border-color:var(--bad); }
+    .event .kind { font-weight:600; }
+    .event time { color:var(--dim); font-size:12px; margin-left:8px; }
+    .empty { color:var(--dim); font-size:13px; }
+  </style>
+</head>
+<body>
+  <h1>Smart Watch</h1>
+  <div class="sub">YOLO + motion + people counter on the live camera feed.</div>
+
+  <div class="grid">
+    <div class="panel">
+      <img class="live" src="/stream" alt="live camera">
+    </div>
+    <div>
+      <div class="panel">
+        <div class="status">
+          <span class="dot" id="dot"></span>
+          <span id="status">connecting…</span>
+        </div>
+        <div class="metrics">
+          <div class="row"><span>Connected</span><b id="connected">—</b></div>
+          <div class="row"><span>People in frame</span><b id="people">0</b></div>
+          <div class="row"><span>Entered</span><b id="inCount">0</b></div>
+          <div class="row"><span>Exited</span><b id="outCount">0</b></div>
+          <div class="row"><span>Motion</span><b id="motion">idle</b></div>
+          <div class="row"><span>Last alert</span><b id="lastAlert">—</b></div>
+        </div>
+      </div>
+
+      <h2>Recent events</h2>
+      <div id="events"><div class="empty">Nothing yet.</div></div>
+    </div>
+  </div>
+
+<script>
+async function tick() {
+  try {
+    const s = await (await fetch('/api/state')).json();
+
+    document.getElementById('connected').textContent = s.connected ? 'yes' : 'no';
+    document.getElementById('people').textContent = s.people;
+    document.getElementById('inCount').textContent = s.in_count;
+    document.getElementById('outCount').textContent = s.out_count;
+    document.getElementById('motion').textContent = s.motion ? 'detected' : 'idle';
+    document.getElementById('lastAlert').textContent = s.last_alert || '—';
+
+    const dot = document.getElementById('dot');
+    dot.className = 'dot ' + (s.motion ? 'warn' : 'ok');
+    document.getElementById('status').textContent = s.motion ? 'motion seen' : 'watching';
+
+    const box = document.getElementById('events');
+    if (!s.events.length) {
+      box.innerHTML = '<div class="empty">Nothing yet.</div>';
+      return;
+    }
+
+    box.innerHTML = s.events.map(e => `
+      <div class="event ${e.kind}">
+        <span class="kind">${e.kind}</span><time>${e.at}</time>
+        <div>${e.message}</div>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
