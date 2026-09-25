@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YOLO Wall</title>
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e8ec; --dim:#8b93a3;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:20px; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+  h1 { margin:0 0 4px; font-size:20px; }
+  .sub { color:var(--dim); margin-bottom:18px; font-size:13px; }
+  .grid {
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap:14px;
+  }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .tile .label {
+    padding:8px 12px; font-size:13px; color:var(--dim);
+    display:flex; justify-content:space-between; border-bottom:1px solid var(--line);
+  }
+  .tile .label a { color:var(--dim); text-decoration:none; }
+  .tile .label a:hover { color:var(--text); }
+  .tile img { width:100%; display:block; background:#000; aspect-ratio: 16/9; object-fit: contain; }
+</style>
+</head>
+<body>
+  <h1>YOLO Wall</h1>
+  <div class="sub">Every camera, live YOLO detection boxes.</div>
+
+  <div class="grid">
+    <div class="tile">
+      <div class="label"><span>nvr1cam2</span><a href="http://localhost:8092" target="_blank">dashboard</a></div>
+      <img src="http://localhost:8092/stream" alt="nvr1cam2">
+    </div>
+    <div class="tile">
+      <div class="label"><span>nvr1cam3</span><a href="http://localhost:8093" target="_blank">dashboard</a></div>
+      <img src="http://localhost:8093/stream" alt="nvr1cam3">
+    </div>
+    <div class="tile">
+      <div class="label"><span>nvr1cam4</span><a href="http://localhost:8094" target="_blank">dashboard</a></div>
+      <img src="http://localhost:8094/stream" alt="nvr1cam4">
+    </div>
+    <div class="tile">
+      <div class="label"><span>nvr1cam5</span><a href="http://localhost:8095" target="_blank">dashboard</a></div>
+      <img src="http://localhost:8095/stream" alt="nvr1cam5">
+    </div>
+    <div class="tile">
+      <div class="label"><span>nvr1cam8</span><a href="http://localhost:8096" target="_blank">dashboard</a></div>
+      <img src="http://localhost:8096/stream" alt="nvr1cam8">
+    </div>
+  </div>
+</body>
+</html>

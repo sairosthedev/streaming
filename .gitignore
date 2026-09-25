@@ -27,3 +27,17 @@ docs/camera-urls.md
 
 # Offline registry cache: last known good camera list, contains passwords.
 pc/.cache/
+
+# Site runbooks: contain camera credentials and network layout.
+docs/site-*.md
+
+# Camera URL exports: contain the stream key and view password.
+camera-urls*.txt
+
+# Camera URL exports (stream key + view password)
+/camera-urls-cloudflare.txt
+camera-urls-cloudflare.txt
+
+# ML model weights and training runs (large; regenerated)
+weights/
+runs/

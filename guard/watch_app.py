@@ -14,6 +14,7 @@ Then open:
     http://localhost:8092
 """
 import json
+import os
 import threading
 import time
 from collections import defaultdict
@@ -21,8 +22,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-# Log module initialization
-_logpath = r"c:\Users\macdo\Downloads\streaming\watch_app_worker.log"
+# Log module initialization. Suffixed by camera so multiple instances
+# (one per camera on the wall) don't clobber each other's log.
+_cam_suffix = os.getenv("GUARD_CAMERA", "video1")
+_logpath = rf"c:\Users\macdo\Downloads\streaming\watch_app_worker_{_cam_suffix}.log"
 try:
     with open(_logpath, "w") as f:
         f.write("[MODULE] watch_app module starting\n")
@@ -36,7 +39,7 @@ from flask import Flask, Response, jsonify, render_template
 
 import config
 
-DASHBOARD_PORT = 8092
+DASHBOARD_PORT = int(os.getenv("GUARD_PORT", "8092"))
 ALERT_COOLDOWN_SECONDS = 20
 FRAME_SAMPLE_EVERY = 8
 MOTION_THRESHOLD = 0.012
@@ -230,6 +233,9 @@ def worker():
             cap = None
             frame_idx = 0
             fail_count = 0
+            prev_gray = None
+            last_people = {}
+            last_motion = False
             log("[worker] variables initialized")
 
             while True:
@@ -243,7 +249,7 @@ def worker():
                             log(f"[worker] cannot open stream (attempt {fail_count})")
                         time.sleep(2)
                         continue
-                    
+
                     fail_count = 0
                     log(f"[worker] stream opened successfully")
                     with state_lock:
@@ -254,15 +260,36 @@ def worker():
                     if not ok or frame is None:
                         time.sleep(1 / 30)
                         continue
-                    
+
+                    frame_idx += 1
+
+                    gray = cv2.cvtColor(cv2.resize(frame, (320, 180)), cv2.COLOR_BGR2GRAY)
+                    if prev_gray is not None:
+                        last_motion = motion_percentage(prev_gray, gray) > MOTION_THRESHOLD
+                    prev_gray = gray
+
+                    if frame_idx % FRAME_SAMPLE_EVERY == 0:
+                        last_people = detect_people(frame)
+                        people_count, in_count, out_count = update_people_count(last_people, frame_idx)
+                        if people_count > 0:
+                            trigger_alert(f"{people_count} person(s) in frame")
+                        with state_lock:
+                            state.people = people_count
+                            state.in_count = in_count
+                            state.out_count = out_count
+
+                    display = append_annotation(
+                        frame, state.people, last_motion, state.in_count, state.out_count, last_people
+                    )
+
                     with state_lock:
                         state.connected = True
-                        state.frame = frame
-                    
-                    frame_idx += 1
+                        state.motion = last_motion
+                        state.frame = display
+
                     if frame_idx % 30 == 0:
-                        log(f"[worker] frame {frame_idx} connected=true")
-                
+                        log(f"[worker] frame {frame_idx} connected=true people={state.people}")
+
                 except Exception as e:
                     log(f"[worker] read exception: {type(e).__name__}: {e}")
                     try:
@@ -291,6 +318,11 @@ app = Flask(__name__, template_folder="templates")
 @app.route("/")
 def index():
     return render_template("watch.html")
+
+
+@app.route("/wall")
+def wall():
+    return render_template("yolo_wall.html")
 
 
 @app.route("/stream")
