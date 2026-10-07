@@ -1,0 +1,57 @@
+====================================================================
+ eKHAYAH CAMERA MP4 STREAM URLS
+ Server running on the laptop (192.168.89.202) - keep it running.
+ Stream key required on every URL. View password: MkyaDe7fXNhwr3sq
+====================================================================
+
+
+--------------------------------------------------------------------
+ ONLINE (from anywhere) - via Cloudflare tunnel
+ REQUIRES: npm run tunnel also running on the laptop
+--------------------------------------------------------------------
+https://camera.titancctv.xyz/cam-113.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+https://camera.titancctv.xyz/cam-114.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+https://camera.titancctv.xyz/cam-44.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+https://camera.titancctv.xyz/ptz-28-1.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+https://camera.titancctv.xyz/ptz-28-2.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+
+
+--------------------------------------------------------------------
+ LOCAL - on the camera network (192.168.89.x)
+--------------------------------------------------------------------
+http://192.168.89.202:8080/cam-113.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+http://192.168.89.202:8080/cam-114.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+http://192.168.89.202:8080/cam-44.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+http://192.168.89.202:8080/ptz-28-1.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+http://192.168.89.202:8080/ptz-28-2.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+
+
+--------------------------------------------------------------------
+ LOCAL - on the office WiFi network (192.168.5.x)
+--------------------------------------------------------------------
+http://192.168.5.32:8080/cam-113.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+http://192.168.5.32:8080/cam-114.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+http://192.168.5.32:8080/cam-44.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+http://192.168.5.32:8080/ptz-28-1.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+http://192.168.5.32:8080/ptz-28-2.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+
+
+--------------------------------------------------------------------
+ BROWSER PLAYER (with camera picker)
+--------------------------------------------------------------------
+Local:  http://192.168.89.202:8080     (password: MkyaDe7fXNhwr3sq)
+Online: https://camera.titancctv.xyz   (password: MkyaDe7fXNhwr3sq)
+
+
+====================================================================
+ NOTES
+====================================================================
+- ptz-28-1 / ptz-28-2 = the two eyes of the PTZ at 192.168.89.28 (1920x1080).
+- These are LIVE streams (fragmented MP4 over HTTP), not saved clips.
+- The ?key=... is required - keep it on every URL.
+- Keep the laptop powered on and the server (npm start) running.
+- For the online URLs, also run:  npm run tunnel  (in a 2nd window)
+- If laptop sleeps, streams stop. Disable sleep:
+    powercfg /change standby-timeout-ac 0
+    powercfg /change monitor-timeout-ac 0
+====================================================================

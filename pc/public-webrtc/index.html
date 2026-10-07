@@ -135,6 +135,65 @@
   }
 
   .tag { font-family: ui-monospace, Consolas, monospace; color: var(--live); }
+
+  /* PTZ controls: shown only for cameras that can move. */
+  .ptz {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 22px;
+    margin-top: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .ptz[hidden] { display: none; }
+
+  .ptz .pad {
+    display: grid;
+    grid-template-columns: repeat(3, 40px);
+    grid-auto-rows: 40px;
+    gap: 4px;
+  }
+  .ptz .zoom { display: flex; gap: 4px; }
+
+  .ptz button {
+    font: inherit;
+    font-size: 16px;
+    width: 40px; height: 40px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--muted);
+    cursor: pointer;
+    touch-action: none;
+  }
+  .ptz button:hover { color: var(--text); border-color: #4b5259; }
+  .ptz button.held, .ptz button:active { color: var(--bg); background: var(--text); border-color: var(--text); }
+  .ptz .pad .mid { cursor: default; color: var(--dim); }
+  .ptz .pad .mid:hover { color: var(--dim); border-color: var(--line); }
+  .ptz .pad .mid:active { color: var(--dim); background: var(--bg); border-color: var(--line); }
+
+  .ptz label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .ptz input[type=range] { width: 110px; padding: 0; accent-color: var(--live); }
+
+  .ptz select {
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--text);
+    max-width: 180px;
+  }
+  .ptz .go { width: auto; height: auto; padding: 7px 14px; font-size: 13px; }
+
+  .ptz .msg { font-size: 12px; color: var(--dim); min-width: 8ch; }
+  .ptz .msg.bad { color: #f87171; }
 </style>
 </head>
 <body>
@@ -170,8 +229,33 @@
     </div>
   </div>
 
+  <div class="ptz" id="ptz" hidden>
+    <div class="pad" id="pad">
+      <button data-pan="-1" data-tilt="1"  title="Up-left">&#8598;</button>
+      <button data-pan="0"  data-tilt="1"  title="Up (arrow key)">&#8593;</button>
+      <button data-pan="1"  data-tilt="1"  title="Up-right">&#8599;</button>
+      <button data-pan="-1" data-tilt="0"  title="Left (arrow key)">&#8592;</button>
+      <button class="mid" tabindex="-1" title="Hold a direction to move">&#9679;</button>
+      <button data-pan="1"  data-tilt="0"  title="Right (arrow key)">&#8594;</button>
+      <button data-pan="-1" data-tilt="-1" title="Down-left">&#8601;</button>
+      <button data-pan="0"  data-tilt="-1" title="Down (arrow key)">&#8595;</button>
+      <button data-pan="1"  data-tilt="-1" title="Down-right">&#8600;</button>
+    </div>
+    <div class="zoom">
+      <button data-zoom="-1" title="Zoom out (- key)">&minus;</button>
+      <button data-zoom="1"  title="Zoom in (+ key)">+</button>
+    </div>
+    <label>Speed <input type="range" id="ptzSpeed" min="10" max="100" step="10" value="50" /></label>
+    <label>
+      <select id="ptzPresets"><option value="">Preset...</option></select>
+      <button class="go" id="ptzGo" type="button">Go</button>
+      <button class="go" id="ptzSave" type="button" title="Save the current position as a new preset">Save here</button>
+    </label>
+    <span class="msg" id="ptzMsg"></span>
+  </div>
+
   <div class="foot">
-    <span class="tag">WebRTC &middot; sub-second</span>
+    <span class="tag" id="modeTag">WebRTC &middot; sub-second</span>
     <span>Unlimited &middot; served from this PC</span>
   </div>
 </div>
@@ -192,10 +276,22 @@ const camsEl     = document.getElementById('cams');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-let cameras = [];       // [{name,label,ready}]
+let cameras = [];       // [{name,label,ready,ptz}]
 let current = null;     // selected camera name
 let pc = null;
 let retryDelay = 1000;
+
+/**
+ * WebRTC media goes peer-to-peer over UDP, straight to the camera PC -- only
+ * the signalling rides the tunnel. A viewer whose network (or the site's
+ * router) blocks that path gets an open page and no video. When that happens
+ * we fall back to /<name>.mp4, which travels over plain HTTPS through the
+ * tunnel like the page itself: a second or two more delay, works anywhere.
+ * Once WebRTC has failed here, every camera switch goes straight to HTTP.
+ */
+let useHttp = new URLSearchParams(location.search).get('mode') === 'http';
+let everPlayed = false;   // did WebRTC ever show a frame in this tab?
+const modeTag = document.getElementById('modeTag');
 
 function setStatus(state, text) {
   dot.className = 'dot ' + state;
@@ -264,6 +360,7 @@ async function enter() {
 
   renderPicker();
   watch(current);
+  showPtz(current);
 
   // Keep readiness dots fresh.
   setInterval(async () => {
@@ -304,6 +401,7 @@ function renderPicker() {
       history.replaceState(null, '', '?cam=' + encodeURIComponent(cam.name));
       renderPicker();
       watch(cam.name);
+      showPtz(cam.name);
     });
 
     camsEl.appendChild(btn);
@@ -327,12 +425,45 @@ async function watch(name) {
     await sleep(1000);
   }
 
-  connect(name);
+  if (useHttp) playHttp(name);
+  else connect(name);
+}
+
+/** Switch this tab to the HTTP stream and say why. */
+function fallBackToHttp(name, why) {
+  console.warn('WebRTC gave no video, switching to HTTP:', why);
+  useHttp = true;
+  if (current === name) playHttp(name);
+}
+
+function playHttp(name) {
+  if (current !== name) return;
+  cleanup();
+  modeTag.innerHTML = 'HTTP &middot; ~2s delay';
+  loader.hidden = false;
+  loaderText.textContent = 'Connecting to camera...';
+  loaderHint.textContent = '';
+  setStatus('wait', 'Connecting...');
+
+  video.addEventListener('playing', onPlaying);
+  video.onerror = () => {
+    if (current !== name) return;
+    setStatus('wait', 'Reconnecting...');
+    loader.hidden = false;
+    loaderText.textContent = 'Reconnecting...';
+    setTimeout(() => playHttp(name), retryDelay);
+    retryDelay = Math.min(retryDelay * 2, 15000);
+  };
+  // The live stream ends whenever the server restarts; pick it back up.
+  video.onended = video.onerror;
+  video.src = `/${encodeURIComponent(name)}.mp4?t=${Date.now()}`;
+  video.play().catch(() => {});
 }
 
 async function connect(name) {
   if (current !== name) return;
   cleanup();
+  modeTag.innerHTML = 'WebRTC &middot; sub-second';
 
   pc = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -374,6 +505,8 @@ async function connect(name) {
     if (pc.connectionState === 'connected') {
       setStatus('wait', 'Receiving...');
       retryDelay = 1000;
+    } else if (pc.connectionState === 'failed' && !everPlayed) {
+      fallBackToHttp(name, 'peer connection failed');
     } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
       setStatus('wait', 'Reconnecting...');
       loader.hidden = false;
@@ -414,6 +547,7 @@ async function connect(name) {
 }
 
 function onPlaying() {
+  if (!useHttp) everPlayed = true;
   loader.hidden = true;
   setStatus('live', 'Live');
   retryDelay = 1000;
@@ -444,6 +578,14 @@ function watchForFrames(name) {
     });
 
     if (decoded > 0) { clearInterval(timer); return; }
+
+    // Never connected, or connected with nothing arriving: the UDP path is
+    // blocked somewhere. HTTP through the tunnel does not need it.
+    if (elapsed >= 8 && !everPlayed && (received === 0 || pc.connectionState !== 'connected')) {
+      clearInterval(timer);
+      fallBackToHttp(name, `state=${pc.connectionState}, ${received} bytes`);
+      return;
+    }
 
     if (elapsed >= 8) {
       clearInterval(timer);
@@ -477,9 +619,174 @@ function cleanup() {
     pc = null;
   }
   video.srcObject = null;
+  // Dropping the src closes the HTTP stream, which kills its ffmpeg on the server.
+  video.onerror = video.onended = null;
+  if (video.getAttribute('src')) { video.removeAttribute('src'); video.load(); }
 }
 
 window.addEventListener('beforeunload', cleanup);
+
+// ---------------------------------------------------------------------------
+// PTZ: hold a button (or arrow key) to move, release to stop. The server
+// stops the camera by itself if it hears nothing for 2s, so a hold is
+// refreshed every second while it lasts.
+// ---------------------------------------------------------------------------
+
+const ptzEl      = document.getElementById('ptz');
+const ptzSpeed   = document.getElementById('ptzSpeed');
+const ptzPresets = document.getElementById('ptzPresets');
+const ptzGo      = document.getElementById('ptzGo');
+const ptzSave    = document.getElementById('ptzSave');
+const ptzMsg     = document.getElementById('ptzMsg');
+
+let ptzHold = null;     // { btn, axes, timer } while a move is in progress
+
+function ptzSay(text, bad = false) {
+  ptzMsg.textContent = text;
+  ptzMsg.className = 'msg' + (bad ? ' bad' : '');
+}
+
+async function ptzPost(path, body, name = current) {
+  const res = await fetch(`/api/ptz/${encodeURIComponent(name)}/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  });
+  if (res.status === 401) { location.reload(); return; }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `server returned ${res.status}`);
+  }
+}
+
+/** Show the pad for a camera that can move; hide it (and stop) otherwise. */
+async function showPtz(name) {
+  ptzStop();
+  const cam = cameras.find((c) => c.name === name);
+  ptzEl.hidden = !cam?.ptz;
+  ptzSay('');
+  if (ptzEl.hidden) return;
+  loadPresets(name);
+}
+
+async function loadPresets(name) {
+  ptzPresets.innerHTML = '<option value="">Preset...</option>';
+  try {
+    const res = await fetch(`/api/ptz/${encodeURIComponent(name)}/presets`, { cache: 'no-store' });
+    if (!res.ok) return;
+    for (const p of (await res.json()).presets ?? []) {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = `${p.id} - ${p.name}`;
+      ptzPresets.appendChild(o);
+    }
+  } catch {
+    // No presets is fine; the pad still works.
+  }
+}
+
+function ptzStart(btn, axes) {
+  if (ptzHold) ptzStop();
+  const speed = Number(ptzSpeed.value);
+  const body = { pan: axes.pan * speed, tilt: axes.tilt * speed, zoom: axes.zoom * speed };
+
+  const name = current;
+  const send = () => ptzPost('move', body, name).then(() => ptzSay('Moving')).catch((e) => { ptzSay(e.message, true); ptzStop(); });
+  ptzHold = { btn, name, timer: setInterval(send, 1000) };
+  btn?.classList.add('held');
+  send();
+}
+
+/** Stops the camera the hold started on, even if the picker has since moved on. */
+function ptzStop() {
+  if (!ptzHold) return;
+  const { btn, name, timer } = ptzHold;
+  clearInterval(timer);
+  btn?.classList.remove('held');
+  ptzHold = null;
+  ptzPost('stop', null, name).then(() => ptzSay('')).catch((e) => ptzSay(e.message, true));
+}
+
+const axesOf = (btn) => ({
+  pan:  Number(btn.dataset.pan  ?? 0),
+  tilt: Number(btn.dataset.tilt ?? 0),
+  zoom: Number(btn.dataset.zoom ?? 0),
+});
+
+for (const btn of ptzEl.querySelectorAll('button[data-pan], button[data-zoom]')) {
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    btn.setPointerCapture(e.pointerId);
+    ptzStart(btn, axesOf(btn));
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    btn.addEventListener(ev, () => { if (ptzHold?.btn === btn) ptzStop(); });
+  }
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+// Keyboard: arrows pan/tilt, +/- zoom. Only while the pad is on screen and
+// nothing else (the password box, the preset list) has focus.
+const KEYS = {
+  ArrowUp: { pan: 0, tilt: 1, zoom: 0 },
+  ArrowDown: { pan: 0, tilt: -1, zoom: 0 },
+  ArrowLeft: { pan: -1, tilt: 0, zoom: 0 },
+  ArrowRight: { pan: 1, tilt: 0, zoom: 0 },
+  '+': { pan: 0, tilt: 0, zoom: 1 },
+  '=': { pan: 0, tilt: 0, zoom: 1 },
+  '-': { pan: 0, tilt: 0, zoom: -1 },
+};
+let ptzKey = null;
+
+document.addEventListener('keydown', (e) => {
+  if (ptzEl.hidden || e.repeat || !KEYS[e.key]) return;
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName)) return;
+  e.preventDefault();
+  ptzKey = e.key;
+  const sel = e.key === '+' || e.key === '=' ? '[data-zoom="1"]' : e.key === '-' ? '[data-zoom="-1"]'
+    : `[data-pan="${KEYS[e.key].pan}"][data-tilt="${KEYS[e.key].tilt}"]`;
+  ptzStart(ptzEl.querySelector(sel), KEYS[e.key]);
+});
+document.addEventListener('keyup', (e) => {
+  if (e.key === ptzKey) { ptzKey = null; ptzStop(); }
+});
+window.addEventListener('blur', ptzStop);
+
+ptzGo.addEventListener('click', async () => {
+  const id = ptzPresets.value;
+  if (!id) return;
+  ptzGo.disabled = true;
+  try {
+    await ptzPost(`preset/${id}`);
+    ptzSay(`Preset ${id}`);
+  } catch (e) {
+    ptzSay(e.message, true);
+  } finally {
+    ptzGo.disabled = false;
+  }
+});
+
+// Save into the lowest free user slot (1-32); the camera keeps 33+ for itself.
+ptzSave.addEventListener('click', async () => {
+  const name = prompt('Name for this position:');
+  if (!name) return;
+  const used = new Set([...ptzPresets.options].map((o) => Number(o.value)));
+  let id = 1;
+  while (used.has(id) && id <= 32) id++;
+  if (id > 32) { ptzSay('All 32 preset slots are used', true); return; }
+
+  ptzSave.disabled = true;
+  try {
+    await ptzPost(`preset/${id}/save`, { name });
+    await loadPresets(current);
+    ptzPresets.value = String(id);
+    ptzSay(`Saved as preset ${id}`);
+  } catch (e) {
+    ptzSay(e.message, true);
+  } finally {
+    ptzSave.disabled = false;
+  }
+});
 
 boot();
 </script>

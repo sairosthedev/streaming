@@ -6,6 +6,7 @@
  *   npm run cameras -- set-url <name> <rtspUrl>
  *   npm run cameras -- set-mode <name> transcode|passthrough
  *   npm run cameras -- set-mac <name> <mac|none>
+ *   npm run cameras -- set-ptz <name> <channel|none>
  *   npm run cameras -- rename <old-name> <new-name>
  *   npm run cameras -- disable <name>
  *   npm run cameras -- enable <name>
@@ -18,9 +19,12 @@
  * forwarded untouched at near-zero CPU. Leave it off (the default transcodes)
  * for cameras like Dahuas that emit full-range yuvj420p, which browsers render
  * as a grey screen without re-encoding.
+ *
+ * set-ptz turns on pan/tilt/zoom buttons in the player for a Hikvision camera.
+ * The channel is the ISAPI PTZ channel, 1 on nearly every dome.
  */
 import { normalizeMac } from './discover.js';
-import { dbConfigured, getCameras, addCamera, updateCameraUrl, renameCamera, listAll, setEnabled, setTranscode, setMac, removeCamera, closeDb } from './db.js';
+import { dbConfigured, getCameras, addCamera, updateCameraUrl, renameCamera, listAll, setEnabled, setTranscode, setMac, setPtz, removeCamera, closeDb } from './db.js';
 
 if (!dbConfigured()) {
   console.error('\n  MONGODB_URI is not set in .env - the camera registry needs it.\n');
@@ -56,6 +60,7 @@ try {
           c.enabled === false ? 'DISABLED' : 'enabled',
           c.transcode === false ? 'passthrough' : 'transcode',
           c.transport === 'udp' ? 'udp' : 'tcp',
+          ...(c.ptz ? [`ptz ch${c.ptz}`] : []),
         ].join(', ');
         console.log(`  ${c.name.padEnd(16)} ${String(c.label).padEnd(24)} ${flags}`);
         console.log(`  ${''.padEnd(16)} ${maskUrl(c.rtspUrl)}`);
@@ -147,6 +152,20 @@ try {
       break;
     }
 
+    case 'set-ptz': {
+      const [name, ch] = rest;
+      const channel = ch === 'none' ? null : Number(ch);
+      if (!name || !ch || (channel !== null && !(Number.isInteger(channel) && channel > 0))) {
+        console.error('\n  usage: npm run cameras -- set-ptz <name> <channel|none>\n         e.g. npm run cameras -- set-ptz dome 1\n');
+        process.exit(1);
+      }
+      await setPtz(name, channel);
+      console.log(channel
+        ? `\n  "${name}" -> PTZ controls on (ISAPI channel ${channel}). Restart the server to apply.\n`
+        : `\n  "${name}" -> PTZ controls off. Restart the server to apply.\n`);
+      break;
+    }
+
     case 'remove': {
       const [name] = rest;
       if (!name) { console.error('\n  usage: npm run cameras -- remove <name>\n'); process.exit(1); }
@@ -162,6 +181,7 @@ try {
       console.log('    npm run cameras -- set-url <name> <rtspUrl>');
       console.log('    npm run cameras -- set-mode <name> transcode|passthrough');
       console.log('    npm run cameras -- set-mac <name> <mac|none>');
+      console.log('    npm run cameras -- set-ptz <name> <channel|none>');
       console.log('    npm run cameras -- rename <old-name> <new-name>');
       console.log('    npm run cameras -- disable <name>');
       console.log('    npm run cameras -- enable <name>');

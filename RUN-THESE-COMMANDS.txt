@@ -1,0 +1,96 @@
+====================================================================
+ eKHAYAH WINDOWS SERVER - COMMANDS TO RUN
+ Run each block in Administrator PowerShell.
+ (Right-click Start > Windows PowerShell (Admin))
+====================================================================
+
+
+====================================================================
+ STEP 1 - FIX THE CLOUDFLARED TUNNEL CREDENTIALS
+====================================================================
+ The tunnel "titan-camera" needs its credential files copied from
+ your OLD laptop. First make the folder:
+
+mkdir "$env:USERPROFILE\.cloudflared"
+
+ Then transfer these 2 files from the OLD laptop's folder:
+   C:\Users\macdo\.cloudflared\cert.pem
+   C:\Users\macdo\.cloudflared\3f373c52-f47f-48dc-bb06-59d5ffa84b5a.json
+ ...into this machine's folder:
+   C:\Users\<YOUR-USER>\.cloudflared\
+ (Use Send Anywhere or a USB stick.)
+
+ Then verify the tunnel is recognized:
+
+cloudflared tunnel list
+
+ >> You should see "titan-camera" in the list.
+
+
+====================================================================
+ STEP 2 - SET THE STATIC IP (camera network)
+====================================================================
+ IMPORTANT: no space before the = sign.
+
+netsh interface ip set address name="Ethernet" static 192.168.89.55 255.255.255.0
+
+ Confirm it applied:
+
+ipconfig
+
+ >> Ethernet adapter should show 192.168.89.55
+ >> If it shows 169.254.x.x instead, the LINK IS FAILING (bad cable).
+
+
+====================================================================
+ STEP 3 - CHECK THE LINK SPEED (this is the real problem)
+====================================================================
+
+Get-NetAdapter | Where-Object Name -eq "Ethernet"
+
+ >> LinkSpeed MUST show 1000 Mbps.
+ >> If it shows 100 Mbps = BAD CABLE. Replace it with a new Cat6 into
+    a gigabit port on the main switch. Cameras WILL time out at 100 Mbps.
+
+
+====================================================================
+ STEP 4 - TEST CAMERA REACHABILITY
+====================================================================
+
+ping 192.168.89.113
+
+ >> Want steady replies, 0% loss.
+ >> If timing out = the cable/link problem (see Step 3).
+
+
+====================================================================
+ STEP 5 - START THE STREAMING SERVER
+====================================================================
+
+cd C:\streaming\pc
+npm start
+
+ >> Should list cam-113 / cam-114 / cam-44 and http://localhost:8080
+ >> Open http://localhost:8080  (password: MkyaDe7fXNhwr3sq)
+ >> Leave this window open. Ctrl+C to stop.
+
+
+====================================================================
+ STEP 6 - START THE TUNNEL (second PowerShell window)
+====================================================================
+
+cd C:\streaming\pc
+npm run tunnel
+
+ >> Live online at: https://camera.titancctv.xyz
+ >> (password: MkyaDe7fXNhwr3sq)
+
+
+====================================================================
+ THE ONE THING THAT MATTERS MOST
+====================================================================
+ If Get-NetAdapter shows 100 Mbps, NOTHING will stream reliably -
+ not on Windows, Ubuntu, or the Pi. That is a damaged cable.
+ Get a new Cat6 cable into the main managed switch until the
+ link shows 1000 Mbps. Then everything works.
+====================================================================

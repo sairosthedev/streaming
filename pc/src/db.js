@@ -11,6 +11,7 @@
  *     transport: 'tcp',                  // or 'udp'
  *     transcode: true,                   // false = pass H264 through untouched
  *     mac:       'f8:ce:07:3d:57:39',    // optional: re-resolve the IP by MAC
+ *     ptz:       1,                      // optional: ISAPI channel to steer (Hikvision)
  *     enabled:   true,
  *     createdAt: Date
  *   }
@@ -114,6 +115,7 @@ async function getCamerasFromDb() {
       transport: d.transport === 'udp' ? 'udp' : 'tcp',
       transcode: d.transcode !== false,
       mac: d.mac ?? null,
+      ptz: Number.isInteger(d.ptz) && d.ptz > 0 ? d.ptz : null,
     }));
 }
 
@@ -170,6 +172,13 @@ export async function setEnabled(name, enabled) {
 export async function setMac(name, mac) {
   const col = await collection();
   const r = await col.updateOne({ name }, { $set: { mac } });
+  if (!r.matchedCount) throw new Error(`no camera named "${name}"`);
+}
+
+/** Which ISAPI channel the PTZ controls drive, or null for a fixed camera. */
+export async function setPtz(name, ptz) {
+  const col = await collection();
+  const r = await col.updateOne({ name }, { $set: { ptz } });
   if (!r.matchedCount) throw new Error(`no camera named "${name}"`);
 }
 

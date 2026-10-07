@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { which, installHint } from './which.js';
 import { dbConfigured, getCameras } from './db.js';
 import { rediscover } from './discover.js';
+import * as ptz from './ptz.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -41,6 +42,15 @@ const TRANSCODE_BITRATE = process.env.TRANSCODE_BITRATE || '3000k';
  * never be something you get by forgetting to set a variable.
  */
 const STREAM_KEY = process.env.STREAM_KEY || '';
+
+/**
+ * Same idea for /api/ptz: another system (the plant dashboard) steers the
+ * camera with ?key=<PTZ_KEY> or "Authorization: Bearer <PTZ_KEY>". Kept apart
+ * from STREAM_KEY on purpose -- the stream key is in every video URL handed
+ * out, and watching a camera should not also mean being able to move it.
+ * Unset means only a logged-in browser can move it.
+ */
+const PTZ_KEY = process.env.PTZ_KEY || '';
 
 // MediaMTX's own ports. Bound to localhost -- everything reaches them through
 // this server, so the password gate cannot be bypassed by hitting them directly.
@@ -383,9 +393,171 @@ app.get('/api/cameras', requireAuth, async (req, res) => {
     } catch {
       // MediaMTX not up yet.
     }
-    out.push({ name: cam.name, label: cam.label, ready });
+    out.push({ name: cam.name, label: cam.label, ready, ptz: Boolean(cam.ptz) });
   }
   res.json({ cameras: out, error: out.some((c) => c.ready) ? '' : lastError });
+});
+
+// ---------------------------------------------------------------------------
+// PTZ: the player holds a direction button -> /move, releases it -> /stop.
+// Behind the same password as the video. Only cameras with `ptz` set.
+// ---------------------------------------------------------------------------
+
+/**
+ * A browser that loses its connection mid-hold never sends /stop, and the
+ * camera would pan until it hits its limit. Every /move arms a timer that
+ * stops the camera unless another /move or /stop arrives first.
+ */
+const PTZ_DEADMAN_MS = 2000;
+const ptzTimers = new Map();
+
+function ptzKeyIsValid(req) {
+  if (!PTZ_KEY) return false;
+  const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '')?.[1];
+  const supplied = req.query.key ?? bearer ?? '';
+  const a = Buffer.from(String(supplied));
+  const b = Buffer.from(PTZ_KEY);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/** A logged-in browser, or a machine holding PTZ_KEY. */
+function requirePtzAuth(req, res, next) {
+  if (ptzKeyIsValid(req)) return next();
+  return requireAuth(req, res, next);
+}
+
+function ptzCamera(req, res) {
+  const cam = cameras.find((c) => c.name === req.params.cam);
+  if (!cam) { res.status(404).json({ error: 'no such camera' }); return null; }
+  if (!cam.ptz) { res.status(400).json({ error: 'camera has no PTZ control' }); return null; }
+  return cam;
+}
+
+function ptzFail(res, err) {
+  console.error('[ptz]', err.message);
+  res.status(502).json({ error: err.message });
+}
+
+app.post('/api/ptz/:cam/move', requirePtzAuth, async (req, res) => {
+  const cam = ptzCamera(req, res);
+  if (!cam) return;
+  const { pan = 0, tilt = 0, zoom = 0 } = req.body ?? {};
+  try {
+    await ptz.move(cam, { pan, tilt, zoom });
+    clearTimeout(ptzTimers.get(cam.name));
+    ptzTimers.set(cam.name, setTimeout(() => ptz.stop(cam).catch((e) => console.error('[ptz]', e.message)), PTZ_DEADMAN_MS));
+    res.json({ ok: true });
+  } catch (err) {
+    ptzFail(res, err);
+  }
+});
+
+app.post('/api/ptz/:cam/stop', requirePtzAuth, async (req, res) => {
+  const cam = ptzCamera(req, res);
+  if (!cam) return;
+  clearTimeout(ptzTimers.get(cam.name));
+  try {
+    await ptz.stop(cam);
+    res.json({ ok: true });
+  } catch (err) {
+    ptzFail(res, err);
+  }
+});
+
+app.get('/api/ptz/:cam/presets', requirePtzAuth, async (req, res) => {
+  const cam = ptzCamera(req, res);
+  if (!cam) return;
+  try {
+    res.json({ presets: await ptz.presets(cam) });
+  } catch (err) {
+    ptzFail(res, err);
+  }
+});
+
+app.post('/api/ptz/:cam/preset/:id', requirePtzAuth, async (req, res) => {
+  const cam = ptzCamera(req, res);
+  if (!cam) return;
+  try {
+    await ptz.gotoPreset(cam, req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    ptzFail(res, err);
+  }
+});
+
+/** Remember where the camera is pointing now as preset :id (1-32). */
+app.post('/api/ptz/:cam/preset/:id/save', requirePtzAuth, async (req, res) => {
+  const cam = ptzCamera(req, res);
+  if (!cam) return;
+  try {
+    await ptz.savePreset(cam, req.params.id, req.body?.name);
+    res.json({ ok: true });
+  } catch (err) {
+    ptzFail(res, err);
+  }
+});
+
+/** Aim at exact degrees/zoom, the same units /status reports. */
+app.post('/api/ptz/:cam/absolute', requirePtzAuth, async (req, res) => {
+  const cam = ptzCamera(req, res);
+  if (!cam) return;
+  const { azimuth, elevation, zoom } = req.body ?? {};
+  if (![azimuth, elevation, zoom].every((v) => Number.isFinite(Number(v)))) {
+    return res.status(400).json({ error: 'azimuth, elevation and zoom are required' });
+  }
+  try {
+    await ptz.moveTo(cam, { azimuth, elevation, zoom });
+    res.json({ ok: true });
+  } catch (err) {
+    ptzFail(res, err);
+  }
+});
+
+/** Centre on a point of the image: {x,y} fractions 0..1, optional {w,h} box to zoom into. */
+app.post('/api/ptz/:cam/look', requirePtzAuth, async (req, res) => {
+  const cam = ptzCamera(req, res);
+  if (!cam) return;
+  try {
+    await ptz.look(cam, req.body ?? {});
+    res.json({ ok: true });
+  } catch (err) {
+    if (/required/.test(err.message)) return res.status(400).json({ error: err.message });
+    ptzFail(res, err);
+  }
+});
+
+/** Park action: return to a preset after N idle seconds. Enforced by the camera. */
+app.get('/api/ptz/:cam/park', requirePtzAuth, async (req, res) => {
+  const cam = ptzCamera(req, res);
+  if (!cam) return;
+  try {
+    res.json(await ptz.getPark(cam));
+  } catch (err) {
+    ptzFail(res, err);
+  }
+});
+
+app.post('/api/ptz/:cam/park', requirePtzAuth, async (req, res) => {
+  const cam = ptzCamera(req, res);
+  if (!cam) return;
+  try {
+    await ptz.setPark(cam, req.body ?? {});
+    res.json(await ptz.getPark(cam));
+  } catch (err) {
+    if (/must be/.test(err.message)) return res.status(400).json({ error: err.message });
+    ptzFail(res, err);
+  }
+});
+
+/** Where the camera points right now, so a caller can check it is in position. */
+app.get('/api/ptz/:cam/status', requirePtzAuth, async (req, res) => {
+  const cam = ptzCamera(req, res);
+  if (!cam) return;
+  try {
+    res.json(await ptz.status(cam));
+  } catch (err) {
+    ptzFail(res, err);
+  }
 });
 
 /**
@@ -539,7 +711,7 @@ cameras = await loadCameras();
 
 console.log(`\n  Cameras (${cameras.length}):`);
 for (const cam of cameras) {
-  console.log(`    ${cam.name.padEnd(14)} ${cam.transcode ? 'transcode' : 'passthrough'}  ${maskUrl(cam.rtspUrl)}`);
+  console.log(`    ${cam.name.padEnd(14)} ${cam.transcode ? 'transcode' : 'passthrough'}${cam.ptz ? '  ptz' : ''}  ${maskUrl(cam.rtspUrl)}`);
 }
 console.log(`  Source:   ${dbConfigured() ? 'MongoDB registry' : '.env (single camera)'}`);
 console.log(`  Mode:     WebRTC (sub-second)`);

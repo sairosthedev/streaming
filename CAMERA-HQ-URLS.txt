@@ -1,0 +1,49 @@
+====================================================================
+ eKHAYAH CAMERA - HIGH QUALITY (2560x1440 / 2K) STREAM URLS
+ For YOLO training / detection where bags appear far away.
+ ~16x more pixels than the 640x360 substream.
+====================================================================
+
+ Each camera now has TWO versions:
+   <name>      = low quality  640x360   (substream, channel 102)
+   <name>-hq   = HIGH quality 2560x1440 (main stream, channel 101)
+
+--------------------------------------------------------------------
+ HIGH QUALITY - ONLINE (via Cloudflare tunnel, needs npm run tunnel)
+--------------------------------------------------------------------
+cam-113 HQ:
+https://camera.titancctv.xyz/cam-113-hq.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+
+cam-114 HQ:
+https://camera.titancctv.xyz/cam-114-hq.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+
+cam-44 HQ:
+https://camera.titancctv.xyz/cam-44-hq.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+
+--------------------------------------------------------------------
+ HIGH QUALITY - LOCAL (camera network 192.168.89.x)
+--------------------------------------------------------------------
+http://192.168.89.202:8080/cam-113-hq.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+http://192.168.89.202:8080/cam-114-hq.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+http://192.168.89.202:8080/cam-44-hq.mp4?key=wxbtr5kig0uyf2pzvnq68e9js7mc1adhl3o4
+
+====================================================================
+ WHICH CAMERA IS "LOADING BAY RIGHT"?
+====================================================================
+ The camera names here are just their IPs (113 / 114 / 44).
+ Check your website/YOLO config for which IP = Loading Bay Right,
+ then use that camera's -hq link above.
+
+ Resolutions confirmed 2026-09-29:
+   cam-113-hq : 2560x1440 H.264
+   cam-114-hq : 2560x1440 H.264
+   cam-44-hq  : 2560x1440 H.264
+
+====================================================================
+ NOTES
+====================================================================
+- HQ is passthrough (H.264) = near-zero CPU, same as the low-q streams.
+- More bandwidth per HQ stream (~4-8 Mbps vs ~2 Mbps). Fine for 1-3.
+- Keep the laptop on + server running. For online, run: npm run tunnel
+- Low-quality links (no -hq) are unchanged - your current training is safe.
+====================================================================
